@@ -229,6 +229,8 @@ async function start() {
   mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5) loadNext(i); }; });
   buildMoves();
   bindDeckUI();
+  if (await mixer.initKeylock()) mixer.setKeylock($('#keylock').checked);
+  else { $('#keylock').checked = false; $('#keylock').disabled = true; }
   bindPerformance();
 
   $('#splash-msg').textContent = 'rendering demo tracks…';
@@ -441,6 +443,7 @@ function bindPerformance() {
   // tempo
   const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; };
   $('#bpm').oninput = (e) => setBase(+e.target.value);
+  $('#keylock').onchange = (e) => { S.mixer?.setKeylock(e.target.checked); log(`key lock ${e.target.checked ? 'on: tempo changes keep the pitch' : 'off: tempo moves the pitch, like vinyl'}`); };
   $('#bpm-down').onclick = () => setBase(S.tempo.base - 1);
   $('#bpm-up').onclick = () => setBase(S.tempo.base + 1);
   $('#bpm-reset').onclick = () => { const t = S.mixer.onAir().track; if (t) { setBase(t.bpm); log(`tempo back to ${t.bpm.toFixed(1)} BPM`); } };

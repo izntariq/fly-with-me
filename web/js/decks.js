@@ -34,6 +34,20 @@ export class Mixer {
     this.x = 0; // 0 = full A, 1 = full B
     this.setCrossfader(0);
   }
+  // key lock (CDJ "master tempo"): load the pitch-shifter worklet, then switch every deck to it
+  async initKeylock() {
+    try {
+      await this.ctx.audioWorklet.addModule('js/keylock-worklet.js');
+      for (const d of this.decks) d.keyNode = new AudioWorkletNode(this.ctx, 'keylock', { outputChannelCount: [2] });
+      this.keylockReady = true;
+    } catch (e) { this.keylockReady = false; }
+    return this.keylockReady;
+  }
+  setKeylock(on) {
+    this.keylock = on && this.keylockReady;
+    for (const d of this.decks) d.setKeylock(this.keylock);
+  }
+
   // playback rate that puts `track` at `bpm` (folding half/double time)
   rateFor(track, bpm) { let r = bpm / track.bpm; if (r > 1.4) r /= 2; else if (r < 0.7) r *= 2; return r; }
   // master tempo: every playing deck follows it, phase stays locked because they all change at the same instant
@@ -136,6 +150,7 @@ export class Deck {
       s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(dest); s.start(when, startPos);
       return s;
     };
+    this._syncPitch(when);
     const st = this.track.stems;
     this.srcs = st ? [mk(st.drums, this.stemGain.drums), mk(st.music, this.stemGain.music)] : [mk(this.track.buffer, this.input)];
     const src = this.srcs[0];
@@ -157,6 +172,19 @@ export class Deck {
     this.srcs = []; this.src = null;
   }
 
+  // route the deck through its key-lock pitch shifter (pitch = 1/rate cancels the vinyl-style pitch change)
+  setKeylock(on) {
+    if (!this.keyNode) return;
+    this.input.disconnect();
+    if (on) { this.input.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
+    else this.input.connect(this.low);
+    this.keylock = on;
+    this._syncPitch();
+  }
+  _syncPitch(at = this.ctx.currentTime) {
+    if (this.keyNode) this.keyNode.parameters.get('pitch').setValueAtTime(this.keylock ? 1 / this.rate : 1, at);
+  }
+
   // mute / unmute a stem ('drums' | 'music') at ctx time `at` (short ramp, no click)
   setStem(name, on, at = this.ctx.currentTime) {
     const g = this.stemGain[name].gain;
@@ -169,6 +197,7 @@ export class Deck {
     const now = this.ctx.currentTime;
     this.anchorPos = this.position(now); this.anchorCtx = now; this.rate = r;
     for (const s of this.srcs || []) s.playbackRate.setValueAtTime(r, now);
+    this._syncPitch(now);
   }
 
   setEQ(band, db) {
