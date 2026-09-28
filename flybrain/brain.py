@@ -73,7 +73,7 @@ def load_connectome():
     return ids, indptr, indices, weights
 
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True, fastmath=True, nogil=True)
 def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
          stim_idx, v_0, v_th, v_rst, dv_decay, g_decay, k_gv, n_ref, n_dly,
          kick, spk_idx, spk_step):
