@@ -15,8 +15,8 @@
 //               -> fly synth voice swells
 
 export const MOVES = [
-  { key: 'escape', label: 'Giant fiber', types: ['DNp01'], action: 'beat-roll stutter', ratio: 2.2, min: 6, cool: 16 },
-  { key: 'echo', label: 'DNp02 · DNp06 · DNp11 · DNp55', types: ['DNp02', 'DNp06', 'DNp11', 'DNp55'], action: 'echo throw', ratio: 2.0, min: 8, cool: 16 },
+  { key: 'escape', label: 'Giant fiber', types: ['DNp01'], action: 'beat-roll stutter', ratio: 1.5, min: 4, cool: 16 },
+  { key: 'echo', label: 'DNp02 · DNp06 · DNp11 · DNp55', types: ['DNp02', 'DNp06', 'DNp11', 'DNp55'], action: 'echo throw', ratio: 1.4, min: 3, cool: 16 },
   { key: 'reject', label: 'Aversion: DNp42 · DNpe007 · DNge067 · MDN', types: ['DNp42', 'DNpe007', 'DNge067', 'MDN'], action: 'backspin → switch deck', ratio: 3, min: 10, cool: 32 },
   { key: 'filtL', label: 'Left DNp12 · DNb05 · DNg56', types: ['DNp12', 'DNb05', 'DNg56'], side: 'left', action: 'deck A high-pass', continuous: true },
   { key: 'filtR', label: 'Right DNp12 · DNb05 · DNg56', types: ['DNp12', 'DNb05', 'DNg56'], side: 'right', action: 'deck B high-pass', continuous: true },
