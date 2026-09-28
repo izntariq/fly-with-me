@@ -140,3 +140,14 @@ The history was rebuilt from the session transcript (see [GIT.md](GIT.md)) and t
 ## v1.10 — key lock
 - AudioWorklet pitch shifter per deck, so tempo no longer changes pitch (440 Hz stays at 441 Hz at +12% / −10%).
 - with key lock on, styles can move the tempo up to 20% and blends can span 16%.
+
+## v1.11 — a clean key lock
+Key lock is on by default and nearly everything plays slightly sped up or
+slowed down, so the shifter shapes all the audio.
+- The two-head shifter is replaced by **WSOLA**: grains are aligned by cross-correlation, so hits aren't doubled.
+- Measured A/B:
+
+  | | Kick tightness (52% unprocessed) | 440 Hz tone at 0.9–1.12× |
+  |---|---|---|
+  | Old | 45.7–48.5% | 440.8–441.4 Hz |
+  | WSOLA | 50.6–53.5% | 440.1 Hz |

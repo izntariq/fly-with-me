@@ -151,10 +151,14 @@ sampler (horn, siren, laser, boom, riser, dhol roll) ─► limiter
   4. The drop: boom and air horn, jumping to the track's drop cue if it's within 16 bars.
 - **Tempo.** One master BPM drives every deck's playback rate (half and double time are folded). All decks change at
   the same instant, so they stay phase-locked.
-- **Key lock** (`keylock-worklet.js`). Each deck passes through an AudioWorklet pitch shifter set to 1/rate. Two read
-  heads sweep a 50 ms delay line at `pitch` speed, crossfaded with Hann windows that sum to 1.
-  - Measured: 440 Hz stays at 441 Hz at +12% and −10%.
-  - Costs: ~25 ms of latency on the decks, and a little smearing of drum hits.
+- **Key lock** (`keylock-worklet.js`). Each deck passes through an AudioWorklet pitch shifter set to 1/rate.
+  - **Method:** WSOLA (waveform-similarity overlap-add, as in SoundTouch). Hann grains of about 23 ms at 50% overlap
+    read the input at `pitch` speed. Each new grain's read position is searched within ±5.8 ms for the best
+    normalized cross-correlation with the grain already playing.
+  - **Latency:** fixed, about 24 ms.
+  - **A/B against the v1.10 two-head shifter:** kick "tightness" (share of a hit's energy in its best 10 ms) is 52%
+    unprocessed; the old shifter gave 45.7–48.5%, WSOLA gives 50.6–53.5%. A 440 Hz tone comes out at 440.1 Hz at
+    every rate tested, versus 440.8–441.4 Hz before.
 - **Stems.** Demo tracks are synthesized into separate drums and music buffers with identical mastering
   (`finishStems`). Dropped files go through harmonic–percussive separation in `stems-worker.js` (Fitzgerald 2010):
   1. STFT (2048 samples / hop 512).

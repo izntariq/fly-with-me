@@ -110,7 +110,8 @@ phrase. Styles whose DJs don't talk on the mic stay quiet. The MC is heard live 
 the tracklist with when and how each track came in, counts of what the fly did, and the full event log.
 
 **Key lock.** Like a CDJ's *master tempo*: with **key lock** on, tempo changes don't change pitch. Each deck runs
-through a real-time pitch shifter (an AudioWorklet). It measured 441 Hz for a 440 Hz tone at +12% and at −10%.
+through a real-time WSOLA pitch shifter (an AudioWorklet, the method behind SoundTouch). A 440 Hz tone stays at
+440.1 Hz at +12% and at −10%, and drum hits stay as tight as unprocessed.
 With key lock on, DJ styles can move the tempo up to 20% and the fly can blend tracks up to 16% apart.
 
 **Track selection.** When the off-air deck needs a new record, the fly previews up to 3 candidates in its cue ear
