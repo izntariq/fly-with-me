@@ -14,6 +14,8 @@ export class Performer {
     this.mixer = mixer; this.fx = mixer.fx; this.sampler = mixer.sampler; this.synth = synth; this.log = log;
     this.busyUntil = 0;           // a build-up in progress blocks other big moves
     this.onActivity = null;       // (name) => void, for lighting pads
+    this.onBuild = null;          // (T0, Td) => void, e.g. the MC hyping the drop
+    this.buildKind = null;        // () => 'roll' | 'snare' | 'stutter' | 'filter'
   }
   get ctx() { return this.mixer.ctx; }
   get on() { return this.mixer.onAir(); }
@@ -95,7 +97,8 @@ export class Performer {
   //                  high-pass sweep and riser, one beat of silence, then the drop
   //        'stutter' bass / dubstep (Skrillex): hard 1/8 → 1/32 rolls with bit-crush and a steep pitch rise
   //        'filter'  house / techno: a long filter + reverb build, no roll, no horn — the groove never stops
-  buildDrop({ bars = 4, swap = false, who = '', startBeat = null, kind = 'roll', horn = true, gap = true } = {}) {
+  buildDrop({ bars = 4, swap = false, who = '', startBeat = null, kind = null, horn = true, gap = true } = {}) {
+    kind ||= this.buildKind?.() || 'roll';          // default: the build-style selector / the DJ style's favourite
     const on = this.on;
     if (!on.playing || this.busy()) return false;
     const spb = 60 / on.track.bpm / on.rate, beats = bars * 4;
@@ -131,6 +134,7 @@ export class Performer {
     if (horn) this.sampler.airhorn(Td + 0.01);
     this.synth.zap?.(Td);
     this.busyUntil = Td + 2 * spb;
+    this.onBuild?.(T0, Td);
     this._lit('build');
     const name = { roll: 'cue build', snare: 'snare-roll build', stutter: 'stutter build', filter: 'filter build' }[kind];
     this.log(`${who || 'you'} → <b>${bars}-bar ${name}</b> on deck ${on.name}${target !== on ? `, dropping into deck ${target.name}` : ''}`);

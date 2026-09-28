@@ -222,6 +222,7 @@
       <div class="feed">
         <label>Level<input type="range" id="voice-level" min="0" max="1" step="0.01" value="0.6"></label>
         <label class="tog"><input type="checkbox" id="quantize" checked> quantize to beat</label>
+        <label class="tog" title="the fly shouts hype on the mic (browser speech; heard live, not in recordings)"><input type="checkbox" id="mc" checked> 🎤 fly MC</label>
         <label>Scale<select id="scale">
           <option value="auto">follow track</option>
           <option value="minpent">minor pentatonic</option>
@@ -238,6 +239,7 @@
       </div>
       <div class="feed">
         <button id="btn-rec">● Record set</button>
+        <button id="btn-export" title="download a markdown tracklist + everything the fly did">📝 Export set</button>
         <span id="rec-status" class="dim"></span>
       </div>
     </div>

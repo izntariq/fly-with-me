@@ -5,6 +5,7 @@ import { FlyDJ } from './flydj.js';
 import { Performer } from './perform.js';
 import { STYLES } from './djstyles.js';
 import { ARCS, energyAt } from './setplan.js';
+import { MC } from './mc.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
 import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
 import { analyzeEnergy } from './analysis.js';
@@ -22,6 +23,7 @@ const S = {
 function log(html) {
   const li = document.createElement('li');
   const t = S.ctx ? S.ctx.currentTime : 0;
+  (S.history ||= []).push({ t, text: html.replace(/<[^>]+>/g, '') });
   li.innerHTML = `<span class="t">${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}</span>${html}`;
   const ul = $('#log'); ul.prepend(li);
   while (ul.children.length > 80) ul.lastChild.remove();
@@ -200,6 +202,15 @@ async function start() {
   S.perf.onActivity = lightPad;
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
+  S.mc = S.dj.mc = new MC(log);
+  S.mc.enabled = $('#mc').checked;
+  // the MC hypes builds: "are you ready?" halfway, the shout lands on the drop
+  S.perf.buildKind = buildKind;
+  S.perf.onBuild = (T0, Td) => {
+    const now = S.ctx.currentTime;
+    S.dj.shout('ready', Math.max(0, (T0 + Td) / 2 - now));
+    setTimeout(() => { S.mc.last = -1e9; S.dj.shout('hype'); }, Math.max(0, (Td - now) * 1000));
+  };
   S.dj.onLoadNext = loadNext;
   S.dj.onArrive = (deck, { snap, at }) => {
     if (!S.tempo || !$('#follow').checked || !deck.track) return;
@@ -264,6 +275,11 @@ function control() {
   }
   // follow the on-air deck's key
   const on = S.mixer.onAir();
+  if (on.track && on.track !== S.lastOnAir && S.mixer.airness(on) > 0.6) {
+    S.lastOnAir = on.track;
+    const how = [...(S.history || [])].reverse().find((h) => S.ctx.currentTime - h.t < 40 && /echo out|hard cut|drop-swap|dropping into|double drop|1-bar kill|spinback|blend|cut to/.test(h.text));
+    (S.tracklist ||= []).push({ t: S.ctx.currentTime, name: on.track.name, bpm: on.bpm, key: on.track.key || '', how: how ? how.text : 'first track' });
+  }
   if (on.playing && on.track) {
     const sel = $('#scale').value;
     if (sel === 'auto') S.synth.setKey(on.track.root ?? 45, on.track.scale === 'minor' ? 'minpent' : (on.track.scale || 'minpent'));
@@ -525,6 +541,7 @@ function bindGlobalUI() {
   $('#ears-room').onchange = (e) => { S.ears.setMode(e.target.checked ? 'room' : 'split'); log(`fly ears: ${e.target.checked ? 'room mix (it hears itself)' : 'split cue, A left / B right'}`); };
   $('#voice-level').oninput = (e) => { S.dj.voiceLevel = +e.target.value; };
   $('#quantize').onchange = (e) => { S.synth.quantize = e.target.checked; };
+  $('#mc').onchange = (e) => { if (S.mc) S.mc.enabled = e.target.checked; };
   $('#wind').oninput = (e) => { S.wind = +e.target.value; };
   $('#btn-sugar').onclick = () => { S.feed.sugar = performance.now() + 3000; log('🍬 sugar on the proboscis (sugar gustatory neurons, 3 s)'); };
   $('#btn-bitter').onclick = () => { S.feed.bitter = performance.now() + 3000; log('🍋 bitter taste (bitter gustatory neurons, 3 s)'); };
@@ -537,6 +554,7 @@ function bindGlobalUI() {
     if (S.ctx) addFiles(e.dataTransfer.files); else log('press "Start the fly" first, then drop tracks');
   });
   $('#btn-rec').onclick = toggleRecord;
+  $('#btn-export').onclick = exportSet;
   $('#crate-style').onchange = (e) => { S.style = e.target.value; S.crateNext = 0; renderCrate(); log(`crate style → ${S.style}; the fly picks from it at the next track change`); };
   $('#midi-out').onchange = (e) => { S.synth.midi = S.midiOuts?.get(e.target.value) || null; };
 }
@@ -548,6 +566,35 @@ async function initMidi() {
     S.midiOuts = acc.outputs;
     for (const [id, o] of acc.outputs) { const opt = document.createElement('option'); opt.value = id; opt.textContent = o.name; $('#midi-out').append(opt); }
   } catch (e) { /* MIDI not permitted */ }
+}
+
+// markdown set report: style, plan, tracklist with how each track came in, what the fly did, the whole log
+function exportSet() {
+  if (!S.ctx) return;
+  const fmtT = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const hist = S.history || [];
+  const count = (re) => hist.filter((h) => re.test(h.text)).length;
+  const lines = [
+    `# Fly Brain DJ set — ${new Date().toLocaleString()}`, '',
+    `- Length: ${fmtT(S.ctx.currentTime)}`,
+    `- Played like: ${S.dj.persona.name}`,
+    `- Set plan: ${S.dj.arc ? ARCS[S.dj.arc.key].name : 'free'}`,
+    `- Brain: ${S.hello.n_neurons.toLocaleString()} neurons, ${S.hello.n_connections.toLocaleString()} connections (FlyWire v783)`, '',
+    '## Tracklist', '',
+    ...(S.tracklist || []).map((x, i) => `${i + 1}. \`${fmtT(x.t)}\` **${x.name}** — ${x.bpm.toFixed(1)} BPM${x.key ? ', ' + x.key : ''}  \n   _${x.how}_`), '',
+    '## What the fly did', '',
+    `| Move | Times |`, `|---|---|`,
+    ...[['builds & drops', /build/], ['scratches', /scratch/], ['loop rolls', /loop roll/], ['echo / reverb throws', /→ (echo|reverb|dub)/],
+        ['live chops', /live chops/], ['drums out / sing-alongs', /drums out|sing-along/], ['mashups & layers', /mashup|loop layer/],
+        ['transitions', /echo out|hard cut|drop-swap|double drop|1-bar kill|spinback cut|long EQ blend/], ['tracks the fly picked', /the fly's pick/],
+        ['MC shouts', /on the mic/]].map(([n, re]) => `| ${n} | ${count(re)} |`), '',
+    '## Full log', '', '```', ...hist.map((h) => `${fmtT(h.t)}  ${h.text}`), '```', '',
+  ];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/markdown' }));
+  a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
+  a.click();
+  log('📝 set exported: tracklist, move counts and full log');
 }
 
 let rec = null;
@@ -565,6 +612,7 @@ function toggleRecord() {
     a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
     a.click();
     S.mixer.out.disconnect(dest); rec = null;
+    exportSet();
     $('#btn-rec').textContent = '● Record set'; $('#rec-status').textContent = 'saved';
   };
   rec.start(1000);

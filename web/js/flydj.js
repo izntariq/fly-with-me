@@ -83,9 +83,14 @@ export class FlyDJ {
     this.onArrive = null;     // (deck, {snap, at}) => void — a new track is now the one on air
     this.persona = STYLES.fly; // "play like" DJ style: flavours which moves, transitions and builds the fly uses
     this.frameCounts = [];    // recent per-frame descending-neuron spike counts (for spike-driven chop patterns)
+    this.mc = null;           // MC voice (mc.js)
   }
 
   setPersona(key) { this.persona = STYLES[key] || STYLES.fly; }
+  // the fly on the mic; its latest spike count picks the phrase
+  shout(kind = 'hype', delay = 0) {
+    this.mc?.shout({ persona: this.persona.key === 'fly' ? null : this.persona, desi: this.mixer.onAir().track?.style === 'desi', kind, delay, pickN: this.frameCounts.at(-1) || 0 });
+  }
 
   // ---------------- set planner ----------------
   startSet(arcKey, minutes) {
@@ -206,6 +211,7 @@ export class FlyDJ {
     if (sing.fast > 8 && !this.singing) {
       this.singing = true;
       this.log('<b>motor neurons</b> (proboscis / pharynx) firing → the fly sings');
+      this.shout('hype');
       const hype = this.persona.hype ?? ['horn'];
       if (this.auto && hype.length && now - this.lastHorn > 16 * beat) {
         this.lastHorn = now; this.perf.sample(hype[Math.floor(this.t) % hype.length], '<b>motor neurons</b>');
