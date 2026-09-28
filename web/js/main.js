@@ -4,7 +4,7 @@ import { FlySynth } from './synth.js';
 import { FlyDJ } from './flydj.js';
 import { Performer } from './perform.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
-import { trackFromFile, renderDemo, demoCount } from './tracks.js';
+import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
 import { renderDesi, desiCount } from './desi.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -154,7 +154,7 @@ async function addFiles(files) {
     try {
       const t = await trackFromFile(S.ctx, f);
       S.crate.splice(S.crateNext % (S.crate.length + 1), 0, t);   // user tracks play next
-      log(`crate + "${t.name}" (${t.bpm.toFixed(1)} bpm detected)`);
+      log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}`);
       renderCrate();
     } catch (e) { log(`could not decode "${f.name}": ${e.message}`); }
   }
@@ -175,6 +175,19 @@ async function start() {
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
   S.dj.onLoadNext = loadNext;
+  S.dj.onArrive = (deck, { snap, at }) => {
+    if (!S.tempo || !$('#follow').checked || !deck.track) return;
+    const bpm = deck.track.bpm;
+    if (Math.abs(bpm / S.tempo.base - 1) < 0.005) return;
+    if (snap) {
+      // tempo jumps with the cut, on the beat the new track lands
+      setTimeout(() => { S.tempo.base = S.tempo.cur = bpm; S.tempo.glideTo = null; log(`tempo → ${bpm.toFixed(1)} BPM with the cut ("${deck.track.name}")`); },
+        Math.max(0, (at - S.ctx.currentTime) * 1000));
+    } else {
+      S.tempo.glideTo = bpm;
+      log(`tempo journey → drifting toward ${bpm.toFixed(1)} BPM ("${deck.track.name}")`);
+    }
+  };
   S.dj.picker = { candidates, preview: previewTrack, choose: (i, t, why) => loadTrack(i, t, why) };
   mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5) loadNext(i); }; });
   buildMoves();
@@ -183,8 +196,8 @@ async function start() {
 
   $('#splash-msg').textContent = 'rendering demo tracks…';
   S.style = $('#crate-style').value;
-  const jobs = [...Array(desiCount).keys()].map((i) => () => renderDesi(i))
-    .concat([...Array(demoCount).keys()].map((i) => () => renderDemo(i)));
+  const jobs = [...Array(desiCount).keys()].map((i) => async () => describeDemo(await renderDesi(i)))
+    .concat([...Array(demoCount).keys()].map((i) => async () => describeDemo(await renderDemo(i))));
   if (S.style === 'club') jobs.push(...jobs.splice(0, desiCount));
   S.crate.push(await jobs.shift()());
   S.crate.push(await jobs.shift()());
@@ -214,6 +227,10 @@ function control() {
 
   // master tempo (your setting + the fly's ride), glided so changes sound like riding the pitch fader
   if (S.tempo) {
+    if (S.tempo.glideTo) {                     // tempo journey toward the on-air track's own BPM (~20 s)
+      S.tempo.base += (S.tempo.glideTo - S.tempo.base) * Math.min(1, dt / 20);
+      if (Math.abs(S.tempo.glideTo - S.tempo.base) < 0.05) { S.tempo.base = S.tempo.glideTo; S.tempo.glideTo = null; }
+    }
     const ride = S.dj.auto && $('#ride').checked ? S.dj.tempoOffset : 0;
     const target = S.tempo.base * (1 + ride);
     S.tempo.cur += (target - S.tempo.cur) * Math.min(1, dt / 0.6);
@@ -225,7 +242,7 @@ function control() {
     const sel = $('#scale').value;
     if (sel === 'auto') S.synth.setKey(on.track.root ?? 45, on.track.scale === 'minor' ? 'minpent' : (on.track.scale || 'minpent'));
     else S.synth.setKey(on.track.root ?? 45, sel);
-    const style = on.track.style === 'desi' ? 'desi' : (on.track.style === 'club' ? 'club' : (S.style === 'desi' ? 'desi' : 'club'));
+    const style = on.track.style === 'desi' ? 'desi' : 'club';
     if (style !== S.synth.style) { S.synth.style = style; log(style === 'desi' ? 'fly voice → <b>dhol + sitar</b> (motor neurons drum, descending neurons play sitar)' : 'fly voice → club synth'); }
   }
 
@@ -285,9 +302,9 @@ function runAct(act, shift = false) {
   else if (kind === 'roll') P.roll(+arg, Math.max(1, beats), 'you');
   else if (kind === 'scratch') P.scratch(arg, Math.max(1, beats), 'you');
   else if (kind === 'build') P.buildDrop({ bars: shift ? 8 : +arg });
-  else if (kind === 'dropswap') P.dropSwap('you') || log('drop swap needs both decks playing');
-  else if (kind === 'echoout') { if (P.echoOut('you')) S.dj.afterCut(); }
-  else if (kind === 'spincut') { if (P.spinCut('you')) S.dj.afterCut(); }
+  else if (kind === 'dropswap') { const at = P.dropSwap('you'); if (at) S.dj.afterCut(at); else log('drop swap needs both decks playing'); }
+  else if (kind === 'echoout') { const at = P.echoOut('you'); if (at) S.dj.afterCut(at); }
+  else if (kind === 'spincut') { const at = P.spinCut('you'); if (at) S.dj.afterCut(at); }
   else if (kind === 'brake') P.brake('you');
   else if (kind === 'backspin') P.backspin('you');
   else if (kind === 'jump') P.beatJump(+arg);
@@ -312,7 +329,7 @@ function bindPerformance() {
   });
   $('#epic').oninput = (e) => { S.dj.epic = +e.target.value; };
   // tempo
-  const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); };
+  const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; };
   $('#bpm').oninput = (e) => setBase(+e.target.value);
   $('#bpm-down').onclick = () => setBase(S.tempo.base - 1);
   $('#bpm-up').onclick = () => setBase(S.tempo.base + 1);
@@ -328,7 +345,7 @@ function bindPerformance() {
     if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     const k = e.key.toLowerCase();
     if (k in cueKeys && S.started) { const [d, c] = cueKeys[k]; S.perf.hotCue(S.mixer.decks[d], c); return; }
-    if ((k === '-' || k === '=') && S.tempo) { S.tempo.base += (k === '=' ? 1 : -1) * (e.shiftKey ? 0.1 : 1); return; }
+    if ((k === '-' || k === '=') && S.tempo) { S.tempo.base += (k === '=' ? 1 : -1) * (e.shiftKey ? 0.1 : 1); S.tempo.glideTo = null; return; }
     const act = keyMap[k];
     if (act) { e.preventDefault(); runAct(act, e.shiftKey); lightPad(act.startsWith('build') ? 'build' : act.split(':')[1] || act); }
   });
@@ -354,7 +371,7 @@ function anim() {
   const mx = S.mixer, colors = ['#35e0c2', '#ff5ca8'];
   mx.decks.forEach((d, i) => {
     drawWave(d.ui.wave, d, colors[i]);
-    setText(d.ui.name, d.track ? d.track.name : '—');
+    setText(d.ui.name, d.track ? `${d.track.name}${d.track.key ? '  ·  ' + d.track.key : ''}` : '—');
     setText(d.ui.bpm, d.track ? `${d.bpm.toFixed(1)} BPM${d.rate !== 1 ? ` (${((d.rate - 1) * 100).toFixed(1)}%)` : ''}` : '— BPM');
     setText(d.ui.time, d.track ? `${fmt(Math.max(0, d.position()))} / ${fmt(d.duration)}` : '0:00');
     setStyle(d.ui.habit, 'width', `${(S.ears.habit[i] * 100).toFixed(0)}%`);

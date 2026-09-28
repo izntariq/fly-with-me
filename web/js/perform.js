@@ -87,10 +87,13 @@ export class Performer {
 
   // ---------------- the big one: cue build & drop ----------------
   // bars of build; at the drop: optional swap to the other deck's drop, or jump this deck to its own drop cue
-  buildDrop({ bars = 4, swap = false, who = '' } = {}) {
+  // startBeat: begin the build at this beat of the on-air track (so it can end exactly on the track's own drop)
+  buildDrop({ bars = 4, swap = false, who = '', startBeat = null } = {}) {
     const on = this.on;
     if (!on.playing || this.busy()) return false;
-    const spb = 60 / on.track.bpm / on.rate, T0 = on.nextBarTime(), beats = bars * 4, Td = T0 + beats * spb;
+    const spb = 60 / on.track.bpm / on.rate, beats = bars * 4;
+    const T0 = startBeat != null && on.timeOfBeat(startBeat) > this.ctx.currentTime + 0.1 ? on.timeOfBeat(startBeat) : on.nextBarTime();
+    const Td = T0 + beats * spb;
     const pos0 = on.position(T0);
     // roll the same cue point with halving lengths: 1/2 → 1/4 → 1/8 → 1/16 (last bar rises in pitch)
     const plan = bars >= 4 ? [0.5, 0.25, 0.125, 0.0625] : [0.25, 0.0625];

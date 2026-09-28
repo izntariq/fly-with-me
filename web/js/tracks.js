@@ -1,5 +1,7 @@
 // Track loading: decode, BPM + beat-phase detection, waveform peaks, and procedurally rendered demo tracks.
 
+import { analyzeTrack, analyzeEnergy, camelot, camelotName } from './analysis.js';
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const SCALES = {
   minpent: [0, 3, 5, 7, 10],
@@ -13,6 +15,7 @@ export const SCALES = {
   yaman: [0, 2, 4, 6, 7, 9, 11],
   bhairavi: [0, 1, 3, 5, 7, 8, 10],
   khamaj: [0, 2, 4, 5, 7, 9, 10],
+  majpent: [0, 2, 4, 7, 9],
 };
 export const noteName = (midi) => NOTE_NAMES[midi % 12];
 
@@ -55,8 +58,8 @@ async function detectBeat(buffer) {
     }
     return [bb, bp];
   };
+  // 85–175 covers hip-hop through drum & bass without folding
   let [bpm] = best(85, 175, 0.5);
-  if (bpm < 100) bpm *= 2;
   let phase; [bpm, phase] = best(bpm - 0.6, bpm + 0.6, 0.02);
   return { bpm: Math.round(bpm * 100) / 100, firstBeat: phase / fps };
 }
@@ -84,8 +87,22 @@ export const DEMO_CUES = [{ name: 'intro', beat: 0 }, { name: 'build', beat: 32 
 export async function trackFromFile(ctx, file) {
   const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
   const { bpm, firstBeat } = await detectBeat(buffer);
-  return { name: file.name.replace(/\.[^.]+$/, ''), buffer, bpm, firstBeat, root: null, scale: null,
-           peaks: peaks(buffer), source: 'file', cues: findCues(buffer, bpm, firstBeat) };
+  const name = file.name.replace(/\.[^.]+$/, '');
+  const a = analyzeTrack(buffer, name, bpm, firstBeat);
+  return { name, buffer, bpm, firstBeat, peaks: peaks(buffer), source: 'file', cues: findCues(buffer, bpm, firstBeat),
+           root: 45 + ((a.key.pc - 9 + 12) % 12), scale: a.key.mode === 'minor' ? 'minpent' : 'majpent',
+           mode: a.key.mode, camelot: a.camelot, energy: a.energy, style: a.style,
+           key: `${a.key.name} · ${camelotName(a.camelot)} · ${a.style}` };
+}
+
+// fill in analysis fields for tracks whose key we already know (the synthesized demos)
+export function describeDemo(t) {
+  const sc = SCALES[t.scale] || SCALES.minor, mode = sc.includes(3) ? 'minor' : 'major';
+  t.mode = mode;
+  t.camelot = camelot(t.root % 12, mode);
+  t.energy = analyzeEnergy(t.buffer, t.bpm, t.firstBeat).energy;
+  t.key = `${t.key} · ${camelotName(t.camelot)}`;
+  return t;
 }
 
 // ---------- demo tracks, rendered offline so the fly has something to play with out of the box ----------
