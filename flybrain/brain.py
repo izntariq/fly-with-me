@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from numba import njit
+from numba import njit, prange
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_DIR = ROOT / "vendor" / "Drosophila_brain_model"
@@ -73,52 +73,69 @@ def load_connectome():
     return ids, indptr, indices, weights
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+N_BLOCKS = 64
+
+
+@njit(cache=True, fastmath=True, nogil=True, parallel=True)
 def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
          stim_idx, v_0, v_th, v_rst, dv_decay, g_decay, k_gv, n_ref, n_dly,
          kick, spk_idx, spk_step):
-    """Advance the network n_steps. Returns number of spikes written to spk_idx/spk_step."""
+    """Advance the network n_steps. Returns number of spikes written to spk_idx/spk_step.
+
+    Integration is parallel over neuron blocks; spike propagation is serial (it
+    scatters into shared postsynaptic buffers).
+    """
     n = v.shape[0]
     D = ring.shape[0]
     n_spk = 0
     cap = spk_idx.shape[0]
+    bsize = (n + N_BLOCKS - 1) // N_BLOCKS
+    local = np.empty((N_BLOCKS, bsize), np.int32)
+    cnt = np.zeros(N_BLOCKS, np.int64)
     for t in range(n_steps):
         step = step0 + t
-        slot = step % D
-        buf = ring[slot]
-        # 1. deliver delayed synaptic input, integrate, threshold
-        for i in range(n):
-            gi = g[i] + buf[i]
-            buf[i] = 0.0
-            if ref[i] > 0:
-                ref[i] -= 1
+        buf = ring[step % D]
+        out = ring[(step + n_dly) % D]
+        # 1. deliver delayed synaptic input, integrate, threshold (parallel)
+        for b in prange(N_BLOCKS):
+            c = 0
+            for i in range(b * bsize, min(n, (b + 1) * bsize)):
+                gi = g[i] + buf[i]
+                buf[i] = 0.0
+                if ref[i] > 0:
+                    ref[i] -= 1
+                    g[i] = gi
+                    continue
+                vi = v[i]
+                if vi == v_0 and gi == 0.0:
+                    continue
+                u = vi - v_0
+                vi = v_0 + u * dv_decay + gi * k_gv
+                gi = gi * g_decay
+                if abs(gi) < 1e-6:
+                    gi = 0.0
+                if vi > v_th:
+                    vi = v_rst
+                    gi = 0.0
+                    ref[i] = n_ref
+                    local[b, c] = i
+                    c += 1
+                elif abs(u) < 1e-5 and gi == 0.0:
+                    vi = v_0
+                v[i] = vi
                 g[i] = gi
-                continue
-            vi = v[i]
-            if vi == v_0 and gi == 0.0:
-                continue
-            u = vi - v_0
-            vi = v_0 + u * dv_decay + gi * k_gv
-            gi = gi * g_decay
-            if abs(gi) < 1e-6:
-                gi = 0.0
-            if vi > v_th:
-                vi = v_rst
-                gi = 0.0
-                ref[i] = n_ref
+            cnt[b] = c
+        # 2. record spikes and schedule postsynaptic input (serial)
+        for b in range(N_BLOCKS):
+            for k in range(cnt[b]):
+                i = local[b, k]
                 if n_spk < cap:
                     spk_idx[n_spk] = i
                     spk_step[n_spk] = step
                     n_spk += 1
-                # schedule postsynaptic input
-                out = ring[(step + n_dly) % D]
-                for k in range(indptr[i], indptr[i + 1]):
-                    out[indices[k]] += weights[k]
-            elif abs(u) < 1e-5 and gi == 0.0:
-                vi = v_0
-            v[i] = vi
-            g[i] = gi
-        # 2. Poisson drive; kicks land on v immediately, like Brian's PoissonInput
+                for s in range(indptr[i], indptr[i + 1]):
+                    out[indices[s]] += weights[s]
+        # 3. Poisson drive; kicks land on v immediately, like Brian's PoissonInput
         for j in range(stim_idx.shape[0]):
             p = rates_p[j]
             if p <= 0.0:
@@ -133,9 +150,8 @@ def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
                         spk_idx[n_spk] = i
                         spk_step[n_spk] = step
                         n_spk += 1
-                    out = ring[(step + n_dly) % D]
-                    for k in range(indptr[i], indptr[i + 1]):
-                        out[indices[k]] += weights[k]
+                    for s in range(indptr[i], indptr[i + 1]):
+                        out[indices[s]] += weights[s]
     return n_spk
 
 
