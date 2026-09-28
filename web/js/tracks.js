@@ -75,66 +75,69 @@ export const demoCount = DEMOS.length;
 function rng(seed) { let s = seed * 2654435761 >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
+// Direct sample-level synthesis (fast: a 90 s track renders in well under a second).
 export async function renderDemo(i) {
   const D = DEMOS[i], sr = 44100, bars = 48, spb = 60 / D.bpm, lead = 0.5;
-  const len = lead + bars * 4 * spb + 2;
-  const ctx = new OfflineAudioContext(2, Math.ceil(len * sr), sr);
+  const N = Math.ceil((lead + bars * 4 * spb + 2) * sr);
+  const L = new Float32Array(N), Rt = new Float32Array(N);
   const R = rng(D.seed), sc = SCALES[D.scale];
-  const master = ctx.createDynamicsCompressor(); master.threshold.value = -10; master.ratio.value = 4;
-  master.connect(ctx.destination);
-  const bus = ctx.createGain(); bus.gain.value = 0.8; bus.connect(master);
-  const noise = ctx.createBuffer(1, sr, sr); { const d = noise.getChannelData(0); for (let k = 0; k < sr; k++) d[k] = Math.random() * 2 - 1; }
   const deg = (d, oct) => D.root + 12 * oct + sc[((d % sc.length) + sc.length) % sc.length] + 12 * Math.floor(d / sc.length);
+  const put = (n, v, pan) => { if (n < N) { L[n] += v * (1 - Math.max(0, pan)); Rt[n] += v * (1 + Math.min(0, pan)); } };
 
   const kick = (t) => {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
-    g.gain.setValueAtTime(1.0, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-    o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.42);
-  };
-  const hat = (t, v, open, pan) => {
-    const s = ctx.createBufferSource(); s.buffer = noise;
-    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
-    const g = ctx.createGain(), p = ctx.createStereoPanner(); p.pan.value = pan;
-    g.gain.setValueAtTime(0.25 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + (open ? 0.22 : 0.05));
-    s.connect(f); f.connect(g); g.connect(p); p.connect(bus); s.start(t, R()); s.stop(t + 0.25);
-  };
-  const clap = (t) => {
-    const s = ctx.createBufferSource(); s.buffer = noise;
-    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 1.2;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, t);
-    for (const d of [0, 0.012, 0.024]) { g.gain.setValueAtTime(0.5, t + d); g.gain.exponentialRampToValueAtTime(0.05, t + d + 0.011); }
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    s.connect(f); f.connect(g); g.connect(bus); s.start(t, R()); s.stop(t + 0.22);
-  };
-  const bass = (t, m, dur) => {
-    const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
-    o.type = 'sawtooth'; o.frequency.value = mtof(m);
-    f.type = 'lowpass'; f.Q.value = 6; f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(140, t + dur);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.005); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(f); f.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.02);
-  };
-  const stab = (t, notes, dur, pan) => {
-    const f = ctx.createBiquadFilter(), g = ctx.createGain(), p = ctx.createStereoPanner();
-    f.type = 'lowpass'; f.frequency.setValueAtTime(3200, t); f.frequency.exponentialRampToValueAtTime(500, t + dur); f.Q.value = 3;
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    p.pan.value = pan; f.connect(g); g.connect(p); p.connect(bus);
-    for (const m of notes) for (const det of [-7, 7]) {
-      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
-      o.connect(f); o.start(t); o.stop(t + dur + 0.02);
+    let ph = 0; const n0 = Math.floor(t * sr);
+    for (let k = 0; k < 0.4 * sr; k++) {
+      const tt = k / sr, f = 45 + 105 * Math.exp(-tt / 0.03);
+      ph += 2 * Math.PI * f / sr;
+      put(n0 + k, Math.sin(ph) * Math.exp(-tt / 0.13) * 0.95, 0);
     }
   };
+  const hat = (t, v, open, pan) => {
+    const n0 = Math.floor(t * sr), len = (open ? 0.25 : 0.06) * sr, dec = open ? 0.07 : 0.014;
+    let y = 0, xp = 0;
+    for (let k = 0; k < len; k++) {
+      const x = Math.random() * 2 - 1; y = 0.45 * (y + x - xp); xp = x;
+      put(n0 + k, y * v * 0.35 * Math.exp(-k / sr / dec), pan);
+    }
+  };
+  const clap = (t) => {
+    const n0 = Math.floor(t * sr); let lo = 0, hp = 0, xp = 0;
+    for (let k = 0; k < 0.22 * sr; k++) {
+      const tt = k / sr, x = Math.random() * 2 - 1;
+      hp = 0.8 * (hp + x - xp); xp = x; lo += 0.35 * (hp - lo);
+      let e = Math.exp(-tt / 0.06) * 0.6;
+      for (const d of [0, 0.011, 0.022]) if (tt >= d && tt < d + 0.01) e = Math.max(e, Math.exp(-(tt - d) / 0.004));
+      put(n0 + k, lo * e * 0.6, 0);
+    }
+  };
+  // Chamberlin state-variable low-pass with exponential cutoff sweep
+  const svfVoice = (t, freqs, dur, f0, f1, q, amp, pan, wave) => {
+    const n0 = Math.floor(t * sr), len = Math.floor(dur * sr);
+    const ph = freqs.map(() => Math.random());
+    let low = 0, band = 0;
+    for (let k = 0; k < len; k++) {
+      const tt = k / sr;
+      let x = 0;
+      for (let j = 0; j < freqs.length; j++) { ph[j] = (ph[j] + freqs[j] / sr) % 1; x += wave === 'saw' ? 2 * ph[j] - 1 : (ph[j] < 0.5 ? 1 : -1); }
+      x /= Math.sqrt(freqs.length);
+      const fc = f0 * Math.pow(f1 / f0, Math.min(1, tt / dur)), f = 2 * Math.sin(Math.PI * Math.min(fc, sr / 7) / sr);
+      low += f * band; const high = x - low - q * band; band += f * high;
+      const env = Math.min(1, tt / 0.004) * Math.exp(-tt / (dur * 0.45));
+      put(n0 + k, low * env * amp, pan);
+    }
+  };
+  const bass = (t, m, dur) => svfVoice(t, [mtof(m)], dur, 1000, 130, 0.25, 0.4, 0, 'saw');
+  const stab = (t, notes, dur, pan) => svfVoice(t, notes.flatMap((m) => [mtof(m) * 0.996, mtof(m) * 1.004]), dur, 3200, 450, 0.4, 0.14, pan, 'saw');
   const pluck = (t, m, pan) => {
-    const o = ctx.createOscillator(), mo = ctx.createOscillator(), mg = ctx.createGain(), g = ctx.createGain(), p = ctx.createStereoPanner();
-    o.frequency.value = mtof(m); mo.frequency.value = mtof(m) * 2; mg.gain.setValueAtTime(mtof(m) * 3, t); mg.gain.exponentialRampToValueAtTime(1, t + 0.2);
-    mo.connect(mg); mg.connect(o.frequency);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.004); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-    p.pan.value = pan; o.connect(g); g.connect(p); p.connect(bus); o.start(t); mo.start(t); o.stop(t + 0.4); mo.stop(t + 0.4);
+    const n0 = Math.floor(t * sr), f = mtof(m);
+    for (let k = 0; k < 0.35 * sr; k++) {
+      const tt = k / sr, I = 3 * Math.exp(-tt / 0.06);
+      put(n0 + k, Math.sin(2 * Math.PI * f * tt + I * Math.sin(2 * Math.PI * 2 * f * tt)) * Math.exp(-tt / 0.09) * 0.1, pan);
+    }
   };
 
   // arrangement: intro 8 (drums) | build 8 (+bass) | main 16 (+stabs, arp) | break 4 | main 8 | outro 4
-  const prog = [0, 0, 5, 3].map((x) => x + Math.floor(R() * 2) * 0);
+  const prog = [0, 0, 5, 3];
   const arp = Array.from({ length: 16 }, () => Math.floor(R() * 8));
   for (let bar = 0; bar < bars; bar++) {
     const sec = bar < 8 ? 'intro' : bar < 16 ? 'build' : bar < 32 ? 'main' : bar < 36 ? 'break' : bar < 44 ? 'main' : 'outro';
@@ -151,15 +154,21 @@ export async function renderDemo(i) {
           if (play) bass(ts, deg(chordRoot, -2) + (s === 3 && D.bassPat === 'rolling' ? 12 : 0), spb / 4 * 0.9);
         }
         if ((sec === 'main' || sec === 'break') && bar % 4 >= 2) {
-          const k = (b * 4 + s);
-          if (R() < 0.55) pluck(ts, deg(chordRoot + arp[k], 1), (k % 2 ? 0.5 : -0.5));
+          const k = b * 4 + s;
+          if (R() < 0.55) pluck(ts, deg(chordRoot + arp[k], 1), k % 2 ? 0.5 : -0.5);
         }
       }
       if ((sec === 'main' || sec === 'break') && (b === 0 || (b === 2 && bar % 2)))
         stab(t + (b === 2 ? spb / 2 : 0), [deg(chordRoot, 0), deg(chordRoot + 2, 0), deg(chordRoot + 4, 0)], spb * (sec === 'break' ? 3 : 0.8), b ? 0.3 : -0.3);
     }
+    if (bar % 4 === 3) await new Promise((r) => setTimeout(r, 0));   // stay responsive
   }
-  const buffer = await ctx.startRendering();
+  let peak = 0;
+  for (let n = 0; n < N; n++) peak = Math.max(peak, Math.abs(L[n]), Math.abs(Rt[n]));
+  const g = 0.9 / Math.max(peak, 1e-6);
+  for (let n = 0; n < N; n++) { L[n] = Math.tanh(L[n] * g * 1.3) * 0.85; Rt[n] = Math.tanh(Rt[n] * g * 1.3) * 0.85; }
+  const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: sr });
+  buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
   return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.scale, peaks: peaks(buffer),
            source: 'demo', key: `${noteName(D.root)} ${D.scale}` };
 }

@@ -147,11 +147,10 @@ async function start() {
   loadNext(1);
   log('the fly is listening: left ear on deck A, right ear on deck B');
   renderCrate();
-  for (let i = 2; i < demoCount; i++) { S.crate.push(await renderDemo(i)); renderCrate(); }
-
   setInterval(control, 25);
   requestAnimationFrame(anim);
   initMidi();
+  for (let i = 2; i < demoCount; i++) { S.crate.push(await renderDemo(i)); renderCrate(); }
 }
 
 // ---------------- control loop (40 Hz) ----------------
