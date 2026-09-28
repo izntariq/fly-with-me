@@ -52,6 +52,27 @@ add them to the crate; tempo and beat grid are detected automatically.
   restocked from the crate and beat-matched on the next bar. Without adaptation a static brain would stay on one deck
   forever. The adaptation lives in the browser (`web/js/ears.js`), not in the connectome model.
 
+## DJ moves
+
+Modelled on what headline DJs actually do: Carl Cox's cue builds (roll the same cue point with shrinking loop
+lengths, then slam into the drop), Richie Hawtin's FX-as-an-instrument, turntablist scratches (Qbert, Jazzy Jeff,
+A-Trak), and desi-set staples (air horn, dhol roll, siren). The fly fires them from neuron bursts; you can fire them
+too with the pads or the keyboard. Everything is quantized to the beat.
+
+| Group | Moves (key) |
+|---|---|
+| Beat FX | echo `Q`, reverb `W`, flanger `E`, trans gate `R`, bit-crush `T`, low-pass dip `Y`, high-pass sweep `U` (length: FX length buttons) |
+| Rolls & scratch | loop roll ¼ `A` / ⅛ `S` / 1/16 `D`, baby `F`, chirp `G`, transformer `H`, flare `J` |
+| Moves | **build & drop** `space` (⇧ = 8 bars), drop swap `B`, echo out `O`, spinback cut `P`, tape stop `K`, spinback `L`, beat jump `,` `.` |
+| Sampler | air horn `Z`, dub siren `X`, laser `C`, boom `V`, riser `N`, dhol roll `M` |
+| Hot cues | deck A `1`–`4`, deck B `7`–`0` (intro / build / drop / break; estimated from energy for your own tracks) |
+| Tempo | master BPM slider, `-` / `=` (⇧ for 0.1), TAP, ↺ back to the track's tempo; both decks follow and stay phase-locked. Pitch moves with tempo (no key-lock). |
+
+**The fly as DJ.** Transitions start on 16-beat phrase lines, and the style is picked by whichever neuron group is most
+excited at that moment: giant fiber → drop swap, echo group → echo out, aversion neurons → spinback cut, calm → long
+EQ blend with bass swap. A surge across all ~1,300 descending neurons triggers a cue build & drop. With *fly rides the
+tempo* on, arousal pushes the BPM up by as much as 6%. **Epicness** scales how often and how hard it plays.
+
 ## Controls
 
 | Control | What it does |

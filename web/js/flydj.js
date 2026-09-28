@@ -84,7 +84,7 @@ export class FlyDJ {
       m.fast += (hz - m.fast) * Math.min(1, dt / 0.3);
       m.slow += (hz - m.slow) * Math.min(1, dt / 10);
       m.level = Math.min(1, m.fast / 60);
-      if (!m.continuous && this.auto && m.slots.length && !this.perf.busy() && !this.pending) {
+      if (!m.continuous && this.auto && this.t > 15 && m.slots.length && !this.perf.busy() && !this.pending) {
         if (m.fast > m.slow * this.ratioOf(m) + m.min && now - m.lastFire > m.cool * beat * this.coolScale
             && now - this.lastAny > 4 * beat * this.coolScale) {
           m.lastFire = now; this.lastAny = now; m.fired = performance.now();

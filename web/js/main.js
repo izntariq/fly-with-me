@@ -67,11 +67,16 @@ function send(obj) { if (S.ws?.readyState === 1) S.ws.send(JSON.stringify(obj));
 function renderCrate() {
   const ol = $('#crate'); ol.innerHTML = '';
   const [A, B] = S.mixer?.decks || [];
+  let nextIdx = -1;
+  for (let k = 0; k < S.crate.length && nextIdx < 0; k++) {
+    const i = (S.crateNext + k) % S.crate.length, t = S.crate[i];
+    if (inStyle(t) && t !== A?.track && t !== B?.track) nextIdx = i;
+  }
   S.crate.forEach((t, i) => {
     const li = document.createElement('li');
     if (!inStyle(t)) li.style.opacity = 0.35;
     if (A?.track === t) li.className = 'a'; else if (B?.track === t) li.className = 'b';
-    li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${i === S.crateNext % S.crate.length ? ' · next' : ''}</span>`;
+    li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${i === nextIdx ? ' · next' : ''}</span>`;
     ol.append(li);
   });
 }
