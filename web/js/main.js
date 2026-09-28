@@ -387,12 +387,13 @@ function runAct(act, shift = false) {
   else if (kind === 'jump') P.beatJump(+arg);
   else if (kind === 'sample') P.sample(arg, 'you');
 }
-// the style's home tempo range, but only if reaching it needs less than an 8% pitch change
+// the style's home tempo range, if the music can get there without sounding wrong:
+// within 8% of its own tempo on vinyl-style pitch, within 20% with key lock on
 function styleTempo(bpm) {
   const r = S.dj?.persona?.bpm;
   if (!r) return bpm;
   const t = Math.min(r[1], Math.max(r[0], bpm));
-  return Math.abs(t / bpm - 1) <= 0.08 ? t : bpm;
+  return Math.abs(t / bpm - 1) <= (S.mixer?.keylock ? 0.2 : 0.08) ? t : bpm;
 }
 
 // build style: the dropdown, or the current DJ style's favourite
@@ -427,7 +428,7 @@ function bindPerformance() {
     if (st.bpm && S.tempo) {
       const target = styleTempo(S.tempo.base);
       if (target !== S.tempo.base) { S.tempo.glideTo = target; log(`${st.name} plays ${st.bpm[0]}–${st.bpm[1]} BPM → tempo drifting to ${target.toFixed(0)}`); }
-      else if (S.tempo.base < st.bpm[0] || S.tempo.base > st.bpm[1]) log(`${st.name} usually plays ${st.bpm[0]}–${st.bpm[1]} BPM; this music is too far away to pitch there, so the tempo stays`);
+      else if (S.tempo.base < st.bpm[0] || S.tempo.base > st.bpm[1]) log(`${st.name} usually plays ${st.bpm[0]}–${st.bpm[1]} BPM; this music is too far away to get there, so the tempo stays`);
     }
     log(`the fly now plays like <b>${st.name}</b>`);
   };

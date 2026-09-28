@@ -291,7 +291,7 @@ export class FlyDJ {
     const gap = on.track && off.track ? Math.abs(off.track.bpm / on.track.bpm - 1) : 0;
     const halfDouble = Math.abs(off.track?.bpm * 2 / on.track?.bpm - 1) < 0.06 || Math.abs(off.track?.bpm / 2 / on.track?.bpm - 1) < 0.06;
     const w = { blend: 1, echo: 1, drop: 1, spin: 1, cut: 0, double: 0, ...(this.persona.transitions || {}) };
-    if (gap > 0.08 && !halfDouble) {                                                       // tempos too far apart to blend
+    if (gap > (this.mixer.keylock ? 0.16 : 0.08) && !halfDouble) {                         // tempos too far apart to blend
       if (w.cut > w.echo && w.cut > w.spin) return 'cut';
       return r('reject') * w.spin > r('echo') * w.echo ? 'spin' : 'echo';
     }
