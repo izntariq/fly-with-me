@@ -28,30 +28,24 @@ export class BrainView {
     b.fillStyle = '#030406'; b.fillRect(0, 0, W, H);
     b.fillStyle = 'rgba(120,140,190,0.07)';
     for (let i = 0; i < n; i++) if (this.ok[i]) b.fillRect(this.px[i], this.py[i], 1, 1);
-    this.glow = document.createElement('canvas'); this.glow.width = W; this.glow.height = H;
-    this.gg = this.glow.getContext('2d');
     this.colors = ['rgba(255,179,71,0.9)', 'rgba(76,195,255,0.95)', 'rgba(255,79,216,1)'];
+    this.pending = [];
+    this.g.drawImage(this.base, 0, 0);
   }
-  addSpikes(idx) {
-    const g = this.gg;
-    for (const i of idx) {
-      if (!this.ok[i]) continue;
-      const k = this.kind[i];
-      g.fillStyle = this.colors[k];
-      const r = k === 2 ? 3 : 2;
-      g.fillRect(this.px[i] - r / 2, this.py[i] - r / 2, r, r);
-    }
-  }
+  addSpikes(idx) { if (this.pending.length < 20000) for (const i of idx) this.pending.push(i); }
+  // cheap trails: blend a little of the static base back over the canvas each frame, then draw the new spikes
   draw() {
     const g = this.g;
-    this.gg.globalCompositeOperation = 'destination-out';
-    this.gg.fillStyle = 'rgba(0,0,0,0.12)';
-    this.gg.fillRect(0, 0, this.glow.width, this.glow.height);
-    this.gg.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 0.14;
     g.drawImage(this.base, 0, 0);
-    g.globalCompositeOperation = 'lighter';
-    g.drawImage(this.glow, 0, 0);
-    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    for (const i of this.pending) {
+      if (!this.ok[i]) continue;
+      const k = this.kind[i], r = k === 2 ? 3 : 2;
+      g.fillStyle = this.colors[k];
+      g.fillRect(this.px[i] - r / 2, this.py[i] - r / 2, r, r);
+    }
+    this.pending.length = 0;
   }
 }
 
@@ -64,7 +58,7 @@ export class Raster {
     this.pxPerSec = canvas.width / 4;
     this.acc = 0;
   }
-  add(spikes) { for (const [s] of spikes) this.pending.push(s); }
+  add(spikes) { if (this.pending.length < 20000) for (const [s] of spikes) this.pending.push(s); }
   draw(dt) {
     const g = this.g, W = this.c.width, H = this.c.height;
     this.acc += dt * this.pxPerSec;
@@ -94,20 +88,34 @@ export function drawEar(canvas, bands, levels, color) {
   g.globalAlpha = 1;
 }
 
+// waveform images are rendered once per track (played + unplayed colour), then just composited per frame
+const waveCache = new WeakMap();
+function waveImages(track, W, H, color) {
+  let c = waveCache.get(track);
+  if (c && c.color === color && c.W === W) return c;
+  const mk = (fill) => {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d'), p = track.peaks, n = p.length;
+    g.fillStyle = '#0b0d12'; g.fillRect(0, 0, W, H);
+    g.fillStyle = fill;
+    for (let i = 0; i < n; i++) { const h = p[i] * H * 0.95; g.fillRect((i / n) * W, (H - h) / 2, Math.max(1, W / n), h); }
+    g.fillStyle = 'rgba(255,255,255,0.08)';
+    const dur = track.buffer.duration, spb = 60 / track.bpm;
+    for (let bt = track.firstBeat; bt < dur; bt += spb * 16) g.fillRect((bt / dur) * W, 0, 1, H);
+    return cv;
+  };
+  c = { color, W, played: mk(color), rest: mk('#39414f') };
+  waveCache.set(track, c);
+  return c;
+}
+
 export function drawWave(canvas, deck, color) {
   const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
-  g.fillStyle = '#0b0d12'; g.fillRect(0, 0, W, H);
   const t = deck.track;
-  if (!t) return;
-  const p = t.peaks, n = p.length, frac = deck.position() / deck.duration;
-  for (let i = 0; i < n; i++) {
-    const x = (i / n) * W, h = p[i] * H * 0.95;
-    g.fillStyle = i / n < frac ? color : '#39414f';
-    g.fillRect(x, (H - h) / 2, Math.max(1, W / n), h);
-  }
-  // beat-grid bar markers
-  const spb = 60 / t.bpm;
-  g.fillStyle = 'rgba(255,255,255,0.08)';
-  for (let bt = t.firstBeat; bt < deck.duration; bt += spb * 16) g.fillRect((bt / deck.duration) * W, 0, 1, H);
-  g.fillStyle = '#fff'; g.fillRect(frac * W - 1, 0, 2, H);
+  if (!t) { g.fillStyle = '#0b0d12'; g.fillRect(0, 0, W, H); return; }
+  const img = waveImages(t, W, H, color);
+  const x = Math.max(0, Math.min(W, (deck.position() / deck.duration) * W));
+  g.drawImage(img.rest, 0, 0);
+  if (x >= 1) g.drawImage(img.played, 0, 0, x, H, 0, 0, x, H);
+  g.fillStyle = '#fff'; g.fillRect(x - 1, 0, 2, H);
 }

@@ -46,7 +46,7 @@ async function onHello(h) {
   const buf = await (await fetch('brain_xy.bin')).arrayBuffer();
   S.xy = new Uint16Array(buf);
   S.brainView = new BrainView($('#brain'), S.xy, h.in_idx, h.out_idx);
-  (function idle() { if (!S.started) { S.brainView.draw(); requestAnimationFrame(idle); } })();
+  (function idle() { if (!S.started) { S.brainView.draw(); setTimeout(idle, 50); } })();
   S.raster = new Raster($('#raster'), h.outputs);
 }
 
@@ -226,9 +226,16 @@ function bindDeckUI() {
 }
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+// only touch the DOM when a value actually changes (keeps Safari's compositor calm)
+const setText = (el, v) => { if (el.textContent !== v) el.textContent = v; };
+const setStyle = (el, k, v) => { if (el.style[k] !== v) el.style[k] = v; };
+
 let lastAnim = performance.now(), lastStat = performance.now();
 function anim() {
-  const now = performance.now(), dt = (now - lastAnim) / 1000; lastAnim = now;
+  requestAnimationFrame(anim);
+  const now = performance.now();
+  if (now - lastAnim < 32 || document.hidden) return;   // ~30 fps is plenty
+  const dt = (now - lastAnim) / 1000; lastAnim = now;
   S.brainView?.draw();
   S.raster?.draw(dt);
   if (S.levels) {
@@ -238,20 +245,20 @@ function anim() {
   const mx = S.mixer, colors = ['#35e0c2', '#ff5ca8'];
   mx.decks.forEach((d, i) => {
     drawWave(d.ui.wave, d, colors[i]);
-    d.ui.name.textContent = d.track ? d.track.name : '—';
-    d.ui.bpm.textContent = d.track ? `${d.bpm.toFixed(1)} BPM${d.rate !== 1 ? ` (${((d.rate - 1) * 100).toFixed(1)}%)` : ''}` : '— BPM';
-    d.ui.time.textContent = d.track ? `${fmt(Math.max(0, d.position()))} / ${fmt(d.duration)}` : '0:00';
-    d.ui.habit.style.width = `${S.ears.habit[i] * 100}%`;
-    d.ui.play.textContent = d.playing ? '■' : '▶';
+    setText(d.ui.name, d.track ? d.track.name : '—');
+    setText(d.ui.bpm, d.track ? `${d.bpm.toFixed(1)} BPM${d.rate !== 1 ? ` (${((d.rate - 1) * 100).toFixed(1)}%)` : ''}` : '— BPM');
+    setText(d.ui.time, d.track ? `${fmt(Math.max(0, d.position()))} / ${fmt(d.duration)}` : '0:00');
+    setStyle(d.ui.habit, 'width', `${(S.ears.habit[i] * 100).toFixed(0)}%`);
+    setText(d.ui.play, d.playing ? '■' : '▶');
     d.ui.root.classList.toggle('onair', mx.airness(d) > 0.5);
     if (!d._manualFilter && document.activeElement !== d.ui.filter) d.ui.filter.value = d.filterVal;
     if (!d._manualEQ) d.ui.low.value = d.eqVals.low;
   });
   if (document.activeElement !== $('#xfader')) $('#xfader').value = mx.x;
   const p = S.dj.pref, bar = $('#pref-bar div');
-  bar.style.left = `${50 + Math.min(0, p) * 50}%`; bar.style.width = `${Math.abs(p) * 50}%`;
+  setStyle(bar, 'left', `${(50 + Math.min(0, p) * 50).toFixed(0)}%`); setStyle(bar, 'width', `${(Math.abs(p) * 50).toFixed(0)}%`);
   S.dj.moves.forEach((m) => {
-    m.barEl.style.width = `${m.level * 100}%`;
+    setStyle(m.barEl, 'width', `${(m.level * 100).toFixed(0)}%`);
     m.el.classList.toggle('fire', m.fired && now - m.fired < 500);
   });
   if (now - lastStat > 1000) {
@@ -261,7 +268,6 @@ function anim() {
     $('#st-time').textContent = (S.stats.t / 1000).toFixed(1);
     S.stats.spikes = 0; lastStat = now;
   }
-  requestAnimationFrame(anim);
 }
 
 function bindGlobalUI() {

@@ -26,7 +26,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from numba import njit, prange
+import os
+
+from numba import njit, prange, set_num_threads
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_DIR = ROOT / "vendor" / "Drosophila_brain_model"
@@ -165,6 +167,9 @@ class Brain:
         self.p = p = params or Params()
         self.ids, self.indptr, self.indices, w = load_connectome()
         self.n = len(self.ids)
+        # a few threads is plenty and stays real-time when the browser is busy too;
+        # every step has a thread barrier, so one descheduled thread stalls all of them
+        set_num_threads(int(os.environ.get("FLYBRAIN_THREADS", min(4, os.cpu_count() or 1))))
         self.weights = (w * p.w_syn).astype(np.float32)
         self.id2idx = {int(f): i for i, f in enumerate(self.ids)}
 
