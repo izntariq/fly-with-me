@@ -78,12 +78,6 @@ function ka() {
   let lp = 0;
   return env(Math.floor(0.12 * SR), (t) => { lp += 0.15 * (Math.random() * 2 - 1 - lp); return (lp * 2 + Math.sin(TAU * 150 * t)) * Math.exp(-t / 0.025) * 0.6; });
 }
-function chimta() {
-  return env(Math.floor(0.3 * SR), (t) => {
-    let s = 0; for (const [f, a] of [[2950, 1], [4210, 0.8], [5630, 0.6], [7350, 0.45]]) s += a * Math.sin(TAU * f * t);
-    return (s * 0.25 + (Math.random() * 2 - 1) * 0.3 * Math.exp(-t / 0.01)) * Math.exp(-t / 0.09) * 0.35;
-  });
-}
 function kick() {
   let ph = 0;
   return env(Math.floor(0.4 * SR), (t) => { ph += TAU * (45 + 100 * Math.exp(-t / 0.03)) / SR; return Math.sin(ph) * Math.exp(-t / 0.13) * 0.9; });
@@ -139,7 +133,7 @@ export async function renderDesi(i) {
 
   const tune = D.groove === 'dholak' ? 1.35 : 1;
   const S = { dg: dagga(tune), tl: tilli(tune), na: dayan(mtof(D.root + 12), 0.5), tin: dayan(mtof(D.root + 12), 0.12),
-              ge: bayan(), ka: ka(), ch: chimta(), kick: kick(), clap: clap() };
+              ge: bayan(), ka: ka(), kick: kick(), clap: clap() };
 
   // tumbi hook: one bar of 16ths, repeated, varied every other bar
   const hookSteps = [0, 2, 3, 4, 6, 8, 10, 11, 12, 14];
@@ -177,15 +171,13 @@ export async function renderDesi(i) {
     }
 
     if (sec === 'intro' && bar < 4) continue;
-    // kick / clap / chimta / sub
+    // kick / clap / sub
     const floor = sec === 'build' || sec === 'main' || sec === 'outro';
     for (let b = 0; b < 4; b++) {
       const t = t0 + b * spb;
       if (floor) {
         if (D.halftime) { if (b === 0 || b === 2) add(S.kick, t, 0.9); if (b === 2 && sec === 'main') add(S.clap, t, 0.9); }
         else { add(S.kick, t, sec === 'build' ? 0.7 : 0.9); if ((b === 1 || b === 3) && sec === 'main') add(S.clap, t, 0.7); }
-        if (sec !== 'build') add(S.ch, t + spb / 2, 0.8, b % 2 ? 0.45 : -0.45);
-        if (D.disco && sec === 'main') add(S.ch, t + spb * 0.75, 0.35, 0.3);
         add(sub(mtof(deg(b === 3 && D.disco ? 4 : 0, -2)), spb * 0.9), t + (D.disco ? spb / 2 : 0), 0.8);
       }
     }
@@ -198,7 +190,9 @@ export async function renderDesi(i) {
     if (sec === 'main' || sec === 'break') {
       if (D.lead === 'tumbi') {
         const h = bar % 2 ? hookAlt : hook;
-        hookSteps.forEach((st, k) => add(pluck('tb', deg(h[k], 2), { dur: 0.5, decay: 0.994, bright: 0.55 }), t0 + st * spb / 4, 0.55, 0.25));
+        // call and response: the hook plays 4 bars, then rests 4 bars; an octave lower and warmer than a raw tumbi
+        if (sec === 'main' && bar % 8 < 4)
+          hookSteps.forEach((st, k) => add(pluck('tb', deg(h[k], 1), { dur: 0.5, decay: 0.994, bright: 0.3 }), t0 + st * spb / 4, 0.4, 0.25));
       } else {
         const half = bar % 2;
         for (let k = 0; k < 8; k++) {
