@@ -15,6 +15,7 @@
 //
 // Move names: roll4 roll8 roll16 brake backspin echo reverb dub flanger trans crush lpf resfilter sweep pump
 //             baby chirp flare transformer orbit crab chop stutter reverse tease layer mashup singalong fill acid
+//             drumsout (drum stem drops out, slams back) melodyout (strip to drums)
 //             horn siren laser boom riser dhol co2
 
 export const STYLES = {
@@ -50,14 +51,14 @@ export const STYLES = {
   calvin: {
     name: 'Calvin Harris', bpm: [124, 128],
     tagline: '"A selector, not a DJ": tight phrase-perfect swaps between hits, drums out so the crowd sings the hook.',
-    moves: { escape: ['singalong', 'roll4'], echo: ['echo'], scratch: ['mashup'], trans: ['pump'], flange: ['singalong'], wind: ['reverb'] },
+    moves: { escape: ['drumsout', 'singalong'], echo: ['echo'], scratch: ['mashup'], trans: ['pump'], flange: ['singalong'], wind: ['reverb'] },
     transitions: { cut: 1.5, blend: 0.8, drop: 0.6 },
     build: { kind: 'snare', bars: 4, horn: false }, blendBars: 4, hype: ['horn'], onAir: [60, 150],
   },
   shm: {
     name: 'Swedish House Mafia', bpm: [126, 128],
     tagline: 'Four decks: acapellas and FX on the outer two, hi-hat loops layered like building blocks, mids-only reverb, crowd-sung finales.',
-    moves: { escape: ['fill', 'roll8'], echo: ['reverb'], scratch: ['mashup', 'layer'], trans: ['layer'], flange: ['sweep', 'singalong'], wind: ['reverb', 'co2'] },
+    moves: { escape: ['fill', 'roll8'], echo: ['reverb'], scratch: ['mashup', 'layer'], trans: ['layer'], flange: ['drumsout', 'singalong'], wind: ['reverb', 'co2'] },
     transitions: { blend: 1, drop: 1.2, double: 0.8 },
     build: { kind: 'snare', bars: 8, horn: false }, blendBars: 8, hype: ['co2'],
   },
@@ -107,7 +108,7 @@ export const STYLES = {
   nucleya: {
     name: 'Nucleya', bpm: [100, 140],
     tagline: 'Desi bass: dhol and tumbi over trap and dubstep; the dhol drops out and comes back twice as hard.',
-    moves: { escape: ['tease', 'stutter'], echo: ['echo', 'siren'], scratch: ['chop'], trans: ['tease', 'dhol'], flange: ['sweep'], wind: ['horn', 'siren'] },
+    moves: { escape: ['drumsout', 'stutter'], echo: ['echo', 'siren'], scratch: ['chop'], trans: ['tease', 'dhol'], flange: ['sweep'], wind: ['horn', 'siren'] },
     transitions: { cut: 1.5, drop: 1.2, blend: 0.4 },
     build: { kind: 'stutter', bars: 4, horn: true, often: 1.3 }, blendBars: 4, hype: ['horn', 'siren', 'dhol'],
   },
@@ -116,21 +117,21 @@ export const STYLES = {
   fredagain: {
     name: 'Fred again..', bpm: [120, 140],
     tagline: 'Live chops: slices of the playing track retriggered and pitched on pads, drops to near-silence for the crowd to sing, fast swaps.',
-    moves: { escape: ['chop', 'stutter'], echo: ['reverb', 'dub'], scratch: ['chop'], trans: ['chop', 'trans'], flange: ['singalong', 'lpf'], wind: ['reverb', 'singalong'] },
+    moves: { escape: ['chop', 'stutter'], echo: ['reverb', 'dub'], scratch: ['chop'], trans: ['chop', 'trans'], flange: ['drumsout', 'singalong'], wind: ['reverb', 'singalong'] },
     transitions: { cut: 1.2, blend: 0.6, echo: 0.8, drop: 0.6, double: 0.3 },
     build: { kind: 'filter', bars: 4, horn: false, often: 0.7 }, blendBars: 4, hype: [], onAir: [40, 120],
   },
   carlcox: {
     name: 'Carl Cox', bpm: [126, 134],
     tagline: 'Three decks, quick precise cuts on the phrase, cue-button builds, loops layered from another deck, spinbacks.',
-    moves: { escape: ['roll4', 'roll8', 'backspin'], echo: ['echo', 'dub'], scratch: ['baby', 'chirp'], trans: ['layer', 'trans'], flange: ['flanger', 'lpf'], wind: ['reverb'] },
+    moves: { escape: ['roll4', 'roll8', 'backspin'], echo: ['echo', 'dub'], scratch: ['baby', 'chirp'], trans: ['layer', 'melodyout'], flange: ['flanger', 'lpf'], wind: ['reverb'] },
     transitions: { blend: 1.2, cut: 0.8, drop: 0.6, echo: 0.6 },
     build: { kind: 'roll', bars: 4, horn: false }, blendBars: 8, hype: [],
   },
   hawtin: {
     name: 'Richie Hawtin', bpm: [125, 132],
     tagline: 'Loops as the instrument: layers from other decks kept rolling for phrases, Model 1 filter sweeps, a foot-pedal delay throw.',
-    moves: { escape: ['layer', 'roll8'], echo: ['dub', 'echo'], scratch: ['layer'], trans: ['trans', 'layer'], flange: ['resfilter', 'flanger'], wind: ['reverb', 'dub'] },
+    moves: { escape: ['layer', 'roll8'], echo: ['dub', 'echo'], scratch: ['melodyout', 'layer'], trans: ['trans', 'layer'], flange: ['resfilter', 'flanger'], wind: ['reverb', 'dub'] },
     transitions: { blend: 2, echo: 0.6, cut: 0.2, drop: 0.2, spin: 0 },
     build: { kind: 'filter', bars: 8, horn: false, often: 0.5 }, blendBars: 16, hype: [], cool: 0.9,
   },
@@ -158,7 +159,7 @@ export const STYLES = {
   blackcoffee: {
     name: 'Black Coffee', bpm: [118, 124],
     tagline: 'Afro house patience: long EQ blends where the percussion interlocks, heavy filters, restrained drops.',
-    moves: { escape: ['lpf'], echo: ['echo', 'reverb'], scratch: ['layer'], trans: ['lpf'], flange: ['sweep'], wind: ['reverb'] },
+    moves: { escape: ['lpf'], echo: ['echo', 'reverb'], scratch: ['layer'], trans: ['melodyout', 'lpf'], flange: ['sweep'], wind: ['reverb'] },
     transitions: { blend: 3, echo: 0.3, cut: 0, drop: 0, spin: 0 },
     build: { kind: 'filter', bars: 8, horn: false, often: 0.3 }, blendBars: 32, hype: [], cool: 2.2,
   },
@@ -193,7 +194,7 @@ export const STYLES = {
   fisher: {
     name: 'Fisher', bpm: [124, 128],
     tagline: 'Tech-house party: the volume drops out a bar before the new phrase, then the next track hits its intro hard.',
-    moves: { escape: ['tease', 'roll4'], echo: ['echo'], scratch: ['chop'], trans: ['tease', 'pump'], flange: ['lpf', 'sweep'], wind: ['reverb'] },
+    moves: { escape: ['tease', 'roll4'], echo: ['echo'], scratch: ['chop'], trans: ['drumsout', 'pump'], flange: ['lpf', 'sweep'], wind: ['reverb'] },
     transitions: { kill: 2.5, blend: 0.6, cut: 0.8 },
     build: { kind: 'filter', bars: 4, horn: false }, blendBars: 8, hype: ['horn'],
   },

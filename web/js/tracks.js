@@ -128,6 +128,22 @@ const DEMOS = [
 ];
 export const demoCount = DEMOS.length;
 
+// Master a rendered track: the full mix plus two stems (drums / music) with identical gain and saturation,
+// so playing the stems together sounds like the mix and either can be muted.
+export function finishStems(L, R, DL, DR, sr, drive = 1.3) {
+  const N = L.length;
+  let peak = 0;
+  for (let n = 0; n < N; n++) peak = Math.max(peak, Math.abs(L[n] + DL[n]), Math.abs(R[n] + DR[n]));
+  const g = 0.9 / Math.max(peak, 1e-6) * drive, sat = (x) => Math.tanh(x * g) * 0.85;
+  const mk = () => new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: sr });
+  const mix = mk(), drums = mk(), music = mk();
+  const ch = (a, b) => { const o = new Float32Array(N); for (let n = 0; n < N; n++) o[n] = sat(a[n] + (b ? b[n] : 0)); return o; };
+  mix.copyToChannel(ch(L, DL), 0); mix.copyToChannel(ch(R, DR), 1);
+  drums.copyToChannel(ch(DL), 0); drums.copyToChannel(ch(DR), 1);
+  music.copyToChannel(ch(L), 0); music.copyToChannel(ch(R), 1);
+  return { buffer: mix, stems: { drums, music } };
+}
+
 export function rng(seed) { let s = seed * 2654435761 >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
@@ -135,17 +151,21 @@ export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 export async function renderDemo(i) {
   const D = DEMOS[i], sr = 44100, bars = 48, spb = 60 / D.bpm, lead = 0.5;
   const N = Math.ceil((lead + bars * 4 * spb + 2) * sr);
-  const L = new Float32Array(N), Rt = new Float32Array(N);
+  const L = new Float32Array(N), Rt = new Float32Array(N), DL = new Float32Array(N), DR = new Float32Array(N);
   const R = rng(D.seed), sc = SCALES[D.scale];
   const deg = (d, oct) => D.root + 12 * oct + sc[((d % sc.length) + sc.length) % sc.length] + 12 * Math.floor(d / sc.length);
-  const put = (n, v, pan) => { if (n < N) { L[n] += v * (1 - Math.max(0, pan)); Rt[n] += v * (1 + Math.min(0, pan)); } };
+  const put = (n, v, pan, drum = false) => {
+    if (n >= N) return;
+    const a = drum ? DL : L, b = drum ? DR : Rt;
+    a[n] += v * (1 - Math.max(0, pan)); b[n] += v * (1 + Math.min(0, pan));
+  };
 
   const kick = (t) => {
     let ph = 0; const n0 = Math.floor(t * sr);
     for (let k = 0; k < 0.4 * sr; k++) {
       const tt = k / sr, f = 45 + 105 * Math.exp(-tt / 0.03);
       ph += 2 * Math.PI * f / sr;
-      put(n0 + k, Math.sin(ph) * Math.exp(-tt / 0.13) * 0.95, 0);
+      put(n0 + k, Math.sin(ph) * Math.exp(-tt / 0.13) * 0.95, 0, true);
     }
   };
   const hat = (t, v, open, pan) => {
@@ -153,7 +173,7 @@ export async function renderDemo(i) {
     let y = 0, xp = 0;
     for (let k = 0; k < len; k++) {
       const x = Math.random() * 2 - 1; y = 0.45 * (y + x - xp); xp = x;
-      put(n0 + k, y * v * 0.35 * Math.exp(-k / sr / dec), pan);
+      put(n0 + k, y * v * 0.35 * Math.exp(-k / sr / dec), pan, true);
     }
   };
   const clap = (t) => {
@@ -163,7 +183,7 @@ export async function renderDemo(i) {
       hp = 0.8 * (hp + x - xp); xp = x; lo += 0.35 * (hp - lo);
       let e = Math.exp(-tt / 0.06) * 0.6;
       for (const d of [0, 0.011, 0.022]) if (tt >= d && tt < d + 0.01) e = Math.max(e, Math.exp(-(tt - d) / 0.004));
-      put(n0 + k, lo * e * 0.6, 0);
+      put(n0 + k, lo * e * 0.6, 0, true);
     }
   };
   // Chamberlin state-variable low-pass with exponential cutoff sweep
@@ -219,12 +239,7 @@ export async function renderDemo(i) {
     }
     if (bar % 4 === 3) await new Promise((r) => setTimeout(r, 0));   // stay responsive
   }
-  let peak = 0;
-  for (let n = 0; n < N; n++) peak = Math.max(peak, Math.abs(L[n]), Math.abs(Rt[n]));
-  const g = 0.9 / Math.max(peak, 1e-6);
-  for (let n = 0; n < N; n++) { L[n] = Math.tanh(L[n] * g * 1.3) * 0.85; Rt[n] = Math.tanh(Rt[n] * g * 1.3) * 0.85; }
-  const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: sr });
-  buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
-  return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.scale, peaks: peaks(buffer),
+  const { buffer, stems } = finishStems(L, Rt, DL, DR, sr, 1.3);
+  return { name: D.name, buffer, stems, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.scale, peaks: peaks(buffer),
            source: 'demo', style: 'club', key: `${noteName(D.root)} ${D.scale}`, cues: DEMO_CUES };
 }

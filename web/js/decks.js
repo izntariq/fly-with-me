@@ -76,6 +76,10 @@ export class Deck {
     this.eqVals = { low: 0, mid: 0, high: 0 }; this.filterVal = 0;
 
     this.input = ctx.createGain();       // main source goes here (slip-muted during FX)
+    // stems: drums and music play as two synced sources, each with its own mute
+    this.stemGain = { drums: ctx.createGain(), music: ctx.createGain() };
+    this.stemGain.drums.connect(this.input); this.stemGain.music.connect(this.input);
+    this.stemOn = { drums: true, music: true };
     this.fxIn = ctx.createGain();        // loop rolls / backspins go here
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 220;
     this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 0.7;
@@ -116,19 +120,25 @@ export class Deck {
   load(track) {
     this.stop();
     this.track = track;
+    this.setStem('drums', true); this.setStem('music', true);
     this.anchorPos = track.cue ?? track.firstBeat;
     this.rate = 1;
   }
 
+  get hasStems() { return !!this.track?.stems; }
+
   play(at = this.ctx.currentTime, pos = this.anchorPos) {
     if (!this.track) return;
     this._stopSrc();
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.track.buffer;
-    src.playbackRate.value = this.rate;
-    src.connect(this.input);
-    const startPos = Math.max(0, pos);
-    src.start(Math.max(at, this.ctx.currentTime), startPos);
+    const startPos = Math.max(0, pos), when = Math.max(at, this.ctx.currentTime);
+    const mk = (buffer, dest) => {
+      const s = this.ctx.createBufferSource();
+      s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(dest); s.start(when, startPos);
+      return s;
+    };
+    const st = this.track.stems;
+    this.srcs = st ? [mk(st.drums, this.stemGain.drums), mk(st.music, this.stemGain.music)] : [mk(this.track.buffer, this.input)];
+    const src = this.srcs[0];
     src.onended = () => { if (this.src === src) { this.playing = false; this.anchorPos = this.duration; this.onEnded?.(this); } };
     this.src = src;
     this.anchorCtx = Math.max(at, this.ctx.currentTime);
@@ -142,13 +152,23 @@ export class Deck {
     this.playing = false;
   }
   _stopSrc() {
-    if (this.src) { this.src.onended = null; try { this.src.stop(); } catch (e) {} this.src.disconnect(); this.src = null; }
+    if (this.src) this.src.onended = null;
+    for (const s of this.srcs || []) { try { s.stop(); } catch (e) {} s.disconnect(); }
+    this.srcs = []; this.src = null;
+  }
+
+  // mute / unmute a stem ('drums' | 'music') at ctx time `at` (short ramp, no click)
+  setStem(name, on, at = this.ctx.currentTime) {
+    const g = this.stemGain[name].gain;
+    g.cancelScheduledValues(at); g.setValueAtTime(on ? 0 : 1, at); g.linearRampToValueAtTime(on ? 1 : 0, at + 0.012);
+    const flip = () => { this.stemOn[name] = on; };
+    if (at <= this.ctx.currentTime + 0.01) flip(); else setTimeout(flip, (at - this.ctx.currentTime) * 1000);
   }
 
   setRate(r) {
     const now = this.ctx.currentTime;
     this.anchorPos = this.position(now); this.anchorCtx = now; this.rate = r;
-    if (this.src) this.src.playbackRate.setValueAtTime(r, now);
+    for (const s of this.srcs || []) s.playbackRate.setValueAtTime(r, now);
   }
 
   setEQ(band, db) {
@@ -277,9 +297,9 @@ export class Deck {
   }
 
   // a one-shot slice of this track, played into `dest` (used for live chops and loop layering)
-  slice(at, pos, len, { rate = this.rate, gain = 1, dest = this.fxIn, loopFor = 0 } = {}) {
+  slice(at, pos, len, { rate = this.rate, gain = 1, dest = this.fxIn, loopFor = 0, buffer = null } = {}) {
     const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
-    src.buffer = this.track.buffer; src.playbackRate.value = rate;
+    src.buffer = buffer || this.track.buffer; src.playbackRate.value = rate;
     const dur = loopFor || len / rate;
     if (loopFor) { src.loop = true; src.loopStart = pos; src.loopEnd = pos + len; }
     g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(gain, at + 0.004);

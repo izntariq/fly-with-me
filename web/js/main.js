@@ -78,7 +78,7 @@ function renderCrate() {
     const li = document.createElement('li');
     if (!inStyle(t)) li.style.opacity = 0.35;
     if (A?.track === t) li.className = 'a'; else if (B?.track === t) li.className = 'b';
-    const score = t.score != null ? ` · 🎧 ${t.score.toFixed(0)}` : '';
+    const score = (t.score != null ? ` · 🎧 ${t.score.toFixed(0)}` : '') + (t.stemProgress != null ? ` · stems ${Math.round(t.stemProgress * 100)}%` : '');
     li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${score}${t.plays ? ` · played ${t.plays}×` : ''}${i === nextIdx && !S.dj?.auto ? ' · next' : ''}</span>`;
     ol.append(li);
   });
@@ -149,6 +149,28 @@ function startSynced(deck, other, startPos = null) {
   S.mixer.masterBpm ||= t.bpm;
 }
 
+// ---------------- stem separation for dropped tracks (web worker) ----------------
+let stemWorker = null, stemJobs = new Map(), stemId = 0;
+function separate(t) {
+  stemWorker ||= new Worker('js/stems-worker.js');
+  stemWorker.onmessage = (e) => {
+    const { id, progress, drums, music } = e.data, tr = stemJobs.get(id);
+    if (!tr) return;
+    if (progress != null) { tr.stemProgress = progress; return; }
+    const mk = (chs) => { const b = S.ctx.createBuffer(2, chs[0].length, tr.buffer.sampleRate); b.copyToChannel(chs[0], 0); b.copyToChannel(chs[1], 1); return b; };
+    tr.stems = { drums: mk(drums), music: mk(music) };
+    tr.stemProgress = null; stemJobs.delete(id);
+    log(`stems ready for "${tr.name}": drums and music can now be muted separately`);
+    // decks already playing it switch to stems on the next bar, seamlessly
+    for (const d of S.mixer.decks) if (d.track === tr && d.playing) { const at = d.nextBarTime(); d.jumpTo(at, d.position(at)); }
+    renderCrate();
+  };
+  const id = ++stemId, b = t.buffer;
+  stemJobs.set(id, t); t.stemProgress = 0;
+  const L = b.getChannelData(0).slice(), R = (b.numberOfChannels > 1 ? b.getChannelData(1) : b.getChannelData(0)).slice();
+  stemWorker.postMessage({ id, L, R, sr: b.sampleRate }, [L.buffer, R.buffer]);
+}
+
 async function addFiles(files) {
   for (const f of files) {
     if (!f.type.startsWith('audio') && !/\.(mp3|wav|ogg|flac|m4a|aac|aiff?)$/i.test(f.name)) continue;
@@ -157,6 +179,7 @@ async function addFiles(files) {
       const t = await trackFromFile(S.ctx, f);
       S.crate.splice(S.crateNext % (S.crate.length + 1), 0, t);   // user tracks play next
       log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}`);
+      separate(t);
       renderCrate();
     } catch (e) { log(`could not decode "${f.name}": ${e.message}`); }
   }
@@ -297,6 +320,9 @@ function bindDeckUI() {
       d.ui[band] = inp;
     }
     root.querySelectorAll('.cue').forEach((b) => { b.onclick = () => S.perf.hotCue(d, +b.dataset.cue); });
+    d.ui.stems = [...root.querySelectorAll('.stem')];
+    d.ui.stemStatus = $('.stem-status', root);
+    d.ui.stems.forEach((b) => { b.onclick = () => { const n = b.dataset.stem; d.setStem(n, !d.stemOn[n], d.playing ? d.nextBeatTime(1) : S.ctx.currentTime); }; });
     const f = $('.filter', root);
     f.oninput = () => { d._manualFilter = true; d.setFilter(+f.value); };
     f.ondblclick = () => { f.value = 0; d._manualFilter = false; };
@@ -324,6 +350,8 @@ function runAct(act, shift = false) {
   else if (kind === 'stutter') P.stutter('you');
   else if (kind === 'reverse') P.reverse('you');
   else if (kind === 'tease') P.bassTease('you');
+  else if (kind === 'drumsout') P.drumsOut({ bars: 4, who: 'you' });
+  else if (kind === 'melodyout') P.melodyOut({ bars: 8, who: 'you' }) || log('strip to drums needs stems (still separating?)');
   else if (kind === 'hardcut') { const at = P.hardCut('you'); if (at) S.dj.afterCut(at); }
   else if (kind === 'killdrop') { const at = P.killDrop('you'); if (at) S.dj.afterCut(at); else log('1-bar kill needs both decks playing'); }
   else if (kind === 'acid') P.acid({ bars: 4, pattern: S.dj.spikePattern(), who: 'you' });
@@ -434,6 +462,8 @@ function anim() {
     setText(d.ui.time, d.track ? `${fmt(Math.max(0, d.position()))} / ${fmt(d.duration)}` : '0:00');
     setStyle(d.ui.habit, 'width', `${(S.ears.habit[i] * 100).toFixed(0)}%`);
     setText(d.ui.play, d.playing ? '■' : '▶');
+    for (const b of d.ui.stems) { b.disabled = !d.hasStems; b.classList.toggle('off', !d.stemOn[b.dataset.stem]); }
+    setText(d.ui.stemStatus, d.hasStems ? '' : d.track?.stemProgress != null ? `separating stems ${Math.round(d.track.stemProgress * 100)}%` : d.track ? 'no stems' : '');
     d.ui.root.classList.toggle('onair', mx.airness(d) > 0.5);
     if (!d._manualFilter && document.activeElement !== d.ui.filter) d.ui.filter.value = d.filterVal;
     if (!d._manualEQ) d.ui.low.value = d.eqVals.low;

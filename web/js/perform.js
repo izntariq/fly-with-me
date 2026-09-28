@@ -144,15 +144,17 @@ export class Performer {
     const on = this.on;
     if (!on.playing) return false;
     const spbT = 60 / on.track.bpm, spb = spbT / on.rate, T0 = on.nextBarTime(), p0 = on.position(T0);
-    const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 0.6;
+    // slice the music stem when there is one (vocals / melody without drums); otherwise band-pass the mix
+    const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = on.hasStems ? 0.2 : 0.6;
     const g = this.ctx.createGain(); g.gain.value = 1.4; bp.connect(g); g.connect(on.fxIn);
+    const buf = on.hasStems ? on.track.stems.music : null;
     const slices = [0, 1, 2, 3].map((k) => p0 - (4 - k) * spbT);             // the last bar, beat by beat
     const pitches = [1, 1, Math.pow(2, 3 / 12), Math.pow(2, -5 / 12)];
     const pat = pattern || Array.from({ length: 16 }, (_, k) => (k % 4 === 3 ? -1 : Math.floor(Math.random() * 4)));
     for (let n = 0; n < bars * 16; n++) {
       const idx = pat[n % pat.length];
       if (idx < 0) continue;
-      on.slice(T0 + n * spb / 4, Math.max(0, slices[idx]), spbT / 4, { rate: on.rate * pitches[idx], gain: 0.9, dest: bp });
+      on.slice(T0 + n * spb / 4, Math.max(0, slices[idx]), spbT / 4, { rate: on.rate * pitches[idx], gain: 0.9, dest: bp, buffer: buf });
     }
     // duck the track a little so the chops sit on top
     on.input.gain.setValueAtTime(1, T0); on.input.gain.linearRampToValueAtTime(0.45, T0 + 0.02);
@@ -189,9 +191,16 @@ export class Performer {
     const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, end = T0 + bars * 4 * spb;
     const x = this.mixer.x, mid = off === this.mixer.decks[1] ? 0.42 : 0.58;
     this.mixer.cutTo(mid, T0); this.mixer.cutTo(x, end);
-    const kill = () => { off.setEQ('low', -24); off.setEQ('high', -8); }, back = () => { off.setEQ('low', 0); off.setEQ('high', 0); };
-    setTimeout(kill, Math.max(0, (T0 - this.ctx.currentTime) * 1000));
-    setTimeout(back, Math.max(0, (end - this.ctx.currentTime) * 1000));
+    if (off.hasStems) {
+      // a real acapella-style layer: the other deck's music stem, its drums muted, bass trimmed
+      off.setStem('drums', false, T0); off.setStem('drums', true, end);
+      setTimeout(() => off.setEQ('low', -12), Math.max(0, (T0 - this.ctx.currentTime) * 1000));
+      setTimeout(() => off.setEQ('low', 0), Math.max(0, (end - this.ctx.currentTime) * 1000));
+    } else {
+      const kill = () => { off.setEQ('low', -24); off.setEQ('high', -8); }, back = () => { off.setEQ('low', 0); off.setEQ('high', 0); };
+      setTimeout(kill, Math.max(0, (T0 - this.ctx.currentTime) * 1000));
+      setTimeout(back, Math.max(0, (end - this.ctx.currentTime) * 1000));
+    }
     this.mixer.lockUntil = end + 0.05;
     this._lit('mashup');
     this.log(`${who || 'you'} → <b>mashup</b>: "${off.track.name}" vocals over "${on.track.name}" for ${bars} bars`);
@@ -203,13 +212,37 @@ export class Performer {
     const on = this.on, off = this.off;
     if (!off.playing) return false;
     const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, spbOff = 60 / off.track.bpm;
-    const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 450;
+    // with stems: loop the other deck's drums (percussion layering); without: its tops above 450 Hz
+    const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = off.hasStems ? 180 : 450;
     const g = this.ctx.createGain(); g.gain.value = 0.7; hp.connect(g); g.connect(this.mixer.master);
     const bar = Math.floor(off.beatAt(T0) / 4) * 4;
-    off.slice(T0, off.posOfBeat(bar), 4 * spbOff, { rate: off.rate, gain: 1, dest: hp, loopFor: bars * 4 * spb });
+    off.slice(T0, off.posOfBeat(bar), 4 * spbOff, { rate: off.rate, gain: 1, dest: hp, loopFor: bars * 4 * spb, buffer: off.hasStems ? off.track.stems.drums : null });
     this._lit('layer');
     this.log(`${who || 'you'} → <b>loop layer</b>: a bar of "${off.track.name}" looped under the mix for ${bars} bars`);
     return T0;
+  }
+
+  // drums out (Nucleya's dhol drop-out, Calvin Harris / Fred again.. sing-alongs): the drum stem drops for `bars`,
+  // then slams back in with a boom. Without stems it falls back to a bass tease.
+  drumsOut({ bars = 4, who = '' } = {}) {
+    const on = this.on;
+    if (!on.hasStems) return this.bassTease(who);
+    const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, end = T0 + bars * 4 * spb;
+    on.setStem('drums', false, T0); on.setStem('drums', true, end);
+    this.sampler.riser(end - 4 * spb, 4 * spb); this.sampler.boom(end);
+    this._lit('drumsout');
+    this.log(`${who || 'you'} → <b>drums out</b> for ${bars} bars, then back in`);
+    return end;
+  }
+  // strip to drums (Hawtin / Carl Cox tools): only the drum stem for `bars`
+  melodyOut({ bars = 8, who = '' } = {}) {
+    const on = this.on;
+    if (!on.hasStems) return false;
+    const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, end = T0 + bars * 4 * spb;
+    on.setStem('music', false, T0); on.setStem('music', true, end);
+    this._lit('melodyout');
+    this.log(`${who || 'you'} → <b>stripped to drums</b> for ${bars} bars`);
+    return end;
   }
 
   // Skrillex / DJ Snake: short brutal edit — 1/32 roll with pitch rise + gate

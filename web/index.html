@@ -48,6 +48,7 @@
         <button class="btn-next" title="load next track from crate">⏭</button>
       </div>
       <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 1">Intro<kbd>1</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 2">Build<kbd>2</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 3">Drop<kbd>3</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 4">Break<kbd>4</kbd></button></div>
+      <div class="stems"><button class="stem" data-stem="drums" title="mute / unmute the drum stem">DRUMS</button><button class="stem" data-stem="music" title="mute / unmute everything but the drums">MUSIC</button><span class="stem-status dim"></span></div>
       <div class="knobs">
         <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
         <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
@@ -93,6 +94,7 @@
         <button class="btn-next" title="load next track from crate">⏭</button>
       </div>
       <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 7">Intro<kbd>7</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 8">Build<kbd>8</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 9">Drop<kbd>9</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 0">Break<kbd>0</kbd></button></div>
+      <div class="stems"><button class="stem" data-stem="drums" title="mute / unmute the drum stem">DRUMS</button><button class="stem" data-stem="music" title="mute / unmute everything but the drums">MUSIC</button><span class="stem-status dim"></span></div>
       <div class="knobs">
         <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
         <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
@@ -163,6 +165,8 @@
         <button class="pad" data-act="stutter">Stutter<kbd>;</kbd></button>
         <button class="pad" data-act="reverse">Reverse<kbd>'</kbd></button>
         <button class="pad" data-act="tease" title="bass out for a bar, then slam it back">Bass tease<kbd>5</kbd></button>
+        <button class="pad" data-act="drumsout" title="drum stem drops for 4 bars, then slams back (Nucleya, Calvin Harris)">Drums out</button>
+        <button class="pad" data-act="melodyout" title="only the drum stem for 8 bars (Hawtin, Carl Cox)">Strip to drums</button>
         <button class="pad" data-act="hardcut">Hard cut<kbd>6</kbd></button>
         <button class="pad" data-act="acid" title="David Guetta's live TB-303, in the track's key">303 acid<kbd>`</kbd></button>
         <button class="pad" data-act="singalong" title="Fred again.. / Calvin Harris: music falls away for the crowd to sing">Sing-along<kbd>/</kbd></button>

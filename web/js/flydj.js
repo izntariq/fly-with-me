@@ -230,6 +230,8 @@ export class FlyDJ {
       case 'tease': return P.bassTease(who);
       case 'layer': return P.layer({ bars: 8, who });
       case 'mashup': return P.mashup({ bars: 16, who });
+      case 'drumsout': return P.drumsOut({ bars: 4, who });
+      case 'melodyout': return P.melodyOut({ bars: 8, who }) || P.beatFx('lpf', 4, who);
       case 'dub': return P.dub(who);
       case 'resfilter': return P.resFilter(who);
       case 'pump': return P.pump(who);

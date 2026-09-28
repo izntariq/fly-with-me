@@ -1,7 +1,7 @@
 // Desi crate: bhangra / tabla / dholak grooves, synthesized sample-by-sample.
 // Plucked strings (tumbi, sitar, tanpura) are Karplus-Strong with meend (glide) and a jawari-style buzz.
 
-import { SCALES, noteName, peaks, rng, mtof, DEMO_CUES } from './tracks.js';
+import { SCALES, noteName, peaks, rng, mtof, DEMO_CUES, finishStems } from './tracks.js';
 
 const SR = 44100;
 const TAU = 2 * Math.PI;
@@ -117,12 +117,14 @@ export const desiCount = DESI.length;
 export async function renderDesi(i) {
   const D = DESI[i], bars = 48, spb = 60 / D.bpm, lead = 0.5;
   const N = Math.ceil((lead + bars * 4 * spb + 3) * SR);
-  const L = new Float32Array(N), Rt = new Float32Array(N);
+  const L = new Float32Array(N), Rt = new Float32Array(N), DL = new Float32Array(N), DR = new Float32Array(N);
   const R = rng(D.seed), sc = SCALES[D.raga];
+  const drumBufs = new Set();                    // anything in here goes to the drums stem
   const deg = (d, oct = 0) => D.root + 12 * oct + sc[((d % sc.length) + sc.length) % sc.length] + 12 * Math.floor(d / sc.length);
   const add = (buf, t, gain = 1, pan = 0) => {
     const n0 = Math.floor(t * SR), gl = gain * (pan > 0 ? 1 - pan : 1), gr = gain * (pan < 0 ? 1 + pan : 1);
-    for (let k = 0, m = Math.min(buf.length, N - n0); k < m; k++) { L[n0 + k] += buf[k] * gl; Rt[n0 + k] += buf[k] * gr; }
+    const a = drumBufs.has(buf) ? DL : L, b = drumBufs.has(buf) ? DR : Rt;
+    for (let k = 0, m = Math.min(buf.length, N - n0); k < m; k++) { a[n0 + k] += buf[k] * gl; b[n0 + k] += buf[k] * gr; }
   };
   const cache = new Map();
   const pluck = (kind, m, opts) => {
@@ -134,6 +136,7 @@ export async function renderDesi(i) {
   const tune = D.groove === 'dholak' ? 1.35 : 1;
   const S = { dg: dagga(tune), tl: tilli(tune), na: dayan(mtof(D.root + 12), 0.5), tin: dayan(mtof(D.root + 12), 0.12),
               ge: bayan(), ka: ka(), kick: kick(), clap: clap() };
+  for (const b of Object.values(S)) drumBufs.add(b);
 
   // tumbi hook: one bar of 16ths, repeated, varied every other bar
   const hookSteps = [0, 2, 3, 4, 6, 8, 10, 11, 12, 14];
@@ -207,12 +210,7 @@ export async function renderDesi(i) {
     if (bar % 4 === 3) await new Promise((r) => setTimeout(r, 0));
   }
 
-  let peak = 0;
-  for (let n = 0; n < N; n++) peak = Math.max(peak, Math.abs(L[n]), Math.abs(Rt[n]));
-  const g = 0.9 / Math.max(peak, 1e-6);
-  for (let n = 0; n < N; n++) { L[n] = Math.tanh(L[n] * g * 1.4) * 0.85; Rt[n] = Math.tanh(Rt[n] * g * 1.4) * 0.85; }
-  const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: SR });
-  buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
-  return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.raga, peaks: peaks(buffer),
+  const { buffer, stems } = finishStems(L, Rt, DL, DR, SR, 1.4);
+  return { name: D.name, buffer, stems, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.raga, peaks: peaks(buffer),
            source: 'demo', style: 'desi', key: `${noteName(D.root)} raag ${D.raga}`, cues: DEMO_CUES };
 }
