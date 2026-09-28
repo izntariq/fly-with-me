@@ -53,6 +53,7 @@ export class FlyDJ {
     this.steerSlots = new Set(this.byKey.steer.slots);
     this.L = 0; this.R = 0; this.bias = 0; this.pref = 0; this.t = 0;
     this.arFast = 0; this.arSlow = 0;
+    this.tempoOffset = 0;     // fractional tempo change the fly wants (arousal -> faster)
     this.commit = 0;          // direction of an in-progress blend (+1 toward B, -1 toward A)
     this.pending = null;      // {at, style, dir} transition scheduled on a phrase line
     this.userHold = 0;        // seconds of manual crossfader override remaining
@@ -97,6 +98,9 @@ export class FlyDJ {
     this.arFast += (ar.fast - this.arFast) * Math.min(1, dt / 1.5);
     this.arSlow += (ar.fast - this.arSlow) * Math.min(1, dt / 40);
     ar.level = Math.min(1, Math.max(0, (this.arFast / (this.arSlow + 1e-3) - 1) * 2));
+    // tempo ride: an aroused fly pushes the tempo up, a calm one lets it sag (±6% at full epicness, slow)
+    const want = (Math.min(1, (this.arFast / (this.arSlow + 1e-3) - 1) * 4) ) * 0.06 * (0.4 + 0.6 * this.epic);
+    this.tempoOffset += (Math.max(-0.06, Math.min(0.06, want)) - this.tempoOffset) * dt / 12;
     if (this.auto && this.t > 30 && !this.pending && !this.commit && !this.perf.busy()
         && this.arFast > this.arSlow * (1.5 - 0.3 * this.epic) && this.arFast - this.arSlow > 0.15
         && now - this.lastBuild > 64 * beat * this.coolScale && this.onAirSince > 20) {

@@ -101,16 +101,16 @@ function loadNext(i) {
 function startSynced(deck, other) {
   const t = deck.track;
   if (other.playing && other.track) {
-    let r = other.bpm / t.bpm;
-    if (r > 1.45) r /= 2; else if (r < 0.7) r *= 2;
-    deck.rate = Math.min(1.12, Math.max(0.88, r));
+    deck.rate = S.mixer.rateFor(t, S.mixer.masterBpm || other.bpm);
     const b = other.beatAt(S.ctx.currentTime + 0.15);
     const bar = Math.ceil(b / 4) * 4;
     deck.play(other.timeOfBeat(bar), t.firstBeat);
   } else {
-    deck.rate = 1;
+    deck.rate = S.mixer.masterBpm ? S.mixer.rateFor(t, S.mixer.masterBpm) : 1;
     deck.play(S.ctx.currentTime + 0.05, deck.anchorPos || t.firstBeat);
   }
+  if (!S.tempo) { S.tempo = { base: t.bpm, cur: t.bpm, applied: t.bpm, taps: [] }; S.mixer.setTempo(t.bpm); }
+  S.mixer.masterBpm ||= t.bpm;
 }
 
 async function addFiles(files) {
@@ -177,10 +177,16 @@ function control() {
   S.levels = lv;
   S.dj.tick(dt);
 
-  // follow the on-air deck's tempo and key
+  // master tempo (your setting + the fly's ride), glided so changes sound like riding the pitch fader
+  if (S.tempo) {
+    const ride = S.dj.auto && $('#ride').checked ? S.dj.tempoOffset : 0;
+    const target = S.tempo.base * (1 + ride);
+    S.tempo.cur += (target - S.tempo.cur) * Math.min(1, dt / 0.6);
+    if (Math.abs(S.tempo.cur - S.tempo.applied) > 0.02) { S.mixer.applyTempo(S.tempo.cur); S.tempo.applied = S.tempo.cur; }
+  }
+  // follow the on-air deck's key
   const on = S.mixer.onAir();
   if (on.playing && on.track) {
-    S.mixer.setTempo(on.bpm);
     const sel = $('#scale').value;
     if (sel === 'auto') S.synth.setKey(on.track.root ?? 45, on.track.scale === 'minor' ? 'minpent' : (on.track.scale || 'minpent'));
     else S.synth.setKey(on.track.root ?? 45, sel);
@@ -270,11 +276,24 @@ function bindPerformance() {
     b.classList.add('sel'); S.fxBeats = +b.dataset.b;
   });
   $('#epic').oninput = (e) => { S.dj.epic = +e.target.value; };
+  // tempo
+  const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); };
+  $('#bpm').oninput = (e) => setBase(+e.target.value);
+  $('#bpm-down').onclick = () => setBase(S.tempo.base - 1);
+  $('#bpm-up').onclick = () => setBase(S.tempo.base + 1);
+  $('#bpm-reset').onclick = () => { const t = S.mixer.onAir().track; if (t) { setBase(t.bpm); log(`tempo back to ${t.bpm.toFixed(1)} BPM`); } };
+  $('#bpm-tap').onclick = () => {
+    const now = performance.now(), taps = S.tempo.taps;
+    if (taps.length && now - taps[taps.length - 1] > 2000) taps.length = 0;
+    taps.push(now); if (taps.length > 6) taps.shift();
+    if (taps.length >= 3) { const bpm = 60000 * (taps.length - 1) / (taps[taps.length - 1] - taps[0]); setBase(bpm); log(`tap tempo → ${bpm.toFixed(1)} BPM`); }
+  };
   const cueKeys = { 1: [0, 0], 2: [0, 1], 3: [0, 2], 4: [0, 3], 7: [1, 0], 8: [1, 1], 9: [1, 2], 0: [1, 3] };
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     const k = e.key.toLowerCase();
     if (k in cueKeys && S.started) { const [d, c] = cueKeys[k]; S.perf.hotCue(S.mixer.decks[d], c); return; }
+    if ((k === '-' || k === '=') && S.tempo) { S.tempo.base += (k === '=' ? 1 : -1) * (e.shiftKey ? 0.1 : 1); return; }
     const act = keyMap[k];
     if (act) { e.preventDefault(); runAct(act, e.shiftKey); lightPad(act.startsWith('build') ? 'build' : act.split(':')[1] || act); }
   });
@@ -311,6 +330,10 @@ function anim() {
   });
   for (const n of ['sweep', 'lpf', 'trans', 'crush', 'flanger', 'reverb']) if (mx.fx.isActive(n)) lightPad(n);
   if (document.activeElement !== $('#xfader')) $('#xfader').value = mx.x;
+  if (S.tempo) {
+    setText($('#bpm-val'), S.tempo.cur.toFixed(1));
+    if (document.activeElement !== $('#bpm')) $('#bpm').value = S.tempo.base;
+  }
   const p = S.dj.pref, bar = $('#pref-bar div');
   setStyle(bar, 'left', `${(50 + Math.min(0, p) * 50).toFixed(0)}%`); setStyle(bar, 'width', `${(Math.abs(p) * 50).toFixed(0)}%`);
   S.dj.moves.forEach((m) => {

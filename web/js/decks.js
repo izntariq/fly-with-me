@@ -34,6 +34,14 @@ export class Mixer {
     this.x = 0; // 0 = full A, 1 = full B
     this.setCrossfader(0);
   }
+  // playback rate that puts `track` at `bpm` (folding half/double time)
+  rateFor(track, bpm) { let r = bpm / track.bpm; if (r > 1.4) r /= 2; else if (r < 0.7) r *= 2; return r; }
+  // master tempo: every playing deck follows it, phase stays locked because they all change at the same instant
+  applyTempo(bpm) {
+    this.masterBpm = bpm;
+    for (const d of this.decks) if (d.track && d.playing) d.setRate(this.rateFor(d.track, bpm));
+    this.setTempo(bpm);
+  }
   setTempo(bpm) {
     this.bpm = bpm;
     if (this.fx) this.fx.bpm = bpm;

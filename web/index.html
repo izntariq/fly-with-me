@@ -59,12 +59,21 @@
         <div class="ear"><span>L ear</span><canvas id="ear-L" width="120" height="60"></canvas></div>
         <div class="ear"><span>R ear</span><canvas id="ear-R" width="120" height="60"></canvas></div>
       </div>
+      <div class="tempo">
+        <button id="bpm-down" title="−1 BPM (key -)">−</button>
+        <div class="bpm-big"><b id="bpm-val">—</b><span>BPM</span></div>
+        <button id="bpm-up" title="+1 BPM (key =)">+</button>
+        <button id="bpm-tap" title="tap the beat">TAP</button>
+        <button id="bpm-reset" title="back to the on-air track's own tempo">↺</button>
+      </div>
+      <input type="range" id="bpm" min="80" max="170" step="0.1" value="124" title="master tempo: both decks follow">
       <div class="xf-wrap">
         <span>A</span><input type="range" id="xfader" min="0" max="1" step="0.001" value="0"><span>B</span>
       </div>
       <div class="pref"><span>fly preference</span><div id="pref-bar"><div></div></div></div>
       <div class="mix-controls">
         <label class="tog"><input type="checkbox" id="auto" checked> fly autopilot</label>
+        <label class="tog"><input type="checkbox" id="ride" checked> fly rides the tempo</label>
         <label class="tog"><input type="checkbox" id="ears-room"> ears hear room mix</label>
       </div>
     </div>

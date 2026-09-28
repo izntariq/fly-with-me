@@ -55,6 +55,11 @@ label.tog { flex-direction: row; align-items: center; gap: 6px; }
 .ears { display: flex; gap: 8px; }
 .ear { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--dim); }
 .ear canvas { width: 100%; height: 60px; background: #0b0d12; border-radius: 4px; }
+.tempo { display: flex; align-items: center; gap: 6px; }
+.tempo button { padding: 4px 9px; }
+.bpm-big { flex: 1; text-align: center; }
+.bpm-big b { font-size: 22px; color: var(--hot); }
+.bpm-big span { font-size: 10px; color: var(--dim); margin-left: 4px; }
 .xf-wrap { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .xf-wrap span:first-child { color: var(--a); } .xf-wrap span:last-child { color: var(--b); }
 #xfader { height: 28px; }
