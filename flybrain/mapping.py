@@ -59,7 +59,7 @@ def build_inputs(ann: pd.DataFrame, id2idx: dict) -> list[InputChannel]:
                               "Johnston's organ C/E wind & gravity neurons"))
     chans.append(InputChannel("sugar", idx((ann.cell_sub_class == "sugar/water") & (ct == "LB3")), 80.0,
                               "sugar-sensing gustatory neurons (reward)"))
-    chans.append(InputChannel("bitter", idx(ann.cell_sub_class == "bitter"), 150.0,
+    chans.append(InputChannel("bitter", idx(ann.cell_sub_class == "bitter"), 100.0,
                               "bitter-sensing gustatory neurons (aversive)"))
     return [c for c in chans if len(c.idx)]
 

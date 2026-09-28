@@ -307,5 +307,6 @@ function toggleRecord() {
   $('#btn-rec').textContent = '■ Stop recording'; $('#rec-status').textContent = 'recording…';
 }
 
+window.flyDJ = S;   // handy for poking at it from the devtools console
 bindGlobalUI();
 connect();
