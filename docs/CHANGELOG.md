@@ -151,3 +151,5 @@ slowed down, so the shifter shapes all the audio.
   |---|---|---|
   | Old | 45.7–48.5% | 440.8–441.4 Hz |
   | WSOLA | 50.6–53.5% | 440.1 Hz |
+- Latency compensation: decks schedule everything that happens before the shifter 24 ms early, so key-locked decks
+  land on the beat grid with rolls, scratches, the synth and the sampler. Deck-vs-grid offset: 24.7 ms → 0.7 ms.

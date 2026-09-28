@@ -155,7 +155,10 @@ sampler (horn, siren, laser, boom, riser, dhol roll) ─► limiter
   - **Method:** WSOLA (waveform-similarity overlap-add, as in SoundTouch). Hann grains of about 23 ms at 50% overlap
     read the input at `pitch` speed. Each new grain's read position is searched within ±5.8 ms for the best
     normalized cross-correlation with the grain already playing.
-  - **Latency:** fixed, about 24 ms.
+  - **Latency:** fixed, about 24 ms. Decks compensate by starting their sources and scheduling their mutes and ducks
+    that much earlier, so what you hear is on the beat grid. Measured deck click minus grid: 24.7 ms before
+    compensation, 0.7 ms after. Rolls, scratches, the fly's synth and the sampler bypass the shifter and are already
+    on the grid.
   - **A/B against the v1.10 two-head shifter:** kick "tightness" (share of a hit's energy in its best 10 ms) is 52%
     unprocessed; the old shifter gave 45.7–48.5%, WSOLA gives 50.6–53.5%. A 440 Hz tone comes out at 440.1 Hz at
     every rate tested, versus 440.8–441.4 Hz before.

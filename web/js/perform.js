@@ -161,8 +161,9 @@ export class Performer {
       on.slice(T0 + n * spb / 4, Math.max(0, slices[idx]), spbT / 4, { rate: on.rate * pitches[idx], gain: 0.9, dest: bp, buffer: buf });
     }
     // duck the track a little so the chops sit on top
-    on.input.gain.setValueAtTime(1, T0); on.input.gain.linearRampToValueAtTime(0.45, T0 + 0.02);
-    on.input.gain.setValueAtTime(0.45, T0 + bars * 4 * spb - 0.02); on.input.gain.linearRampToValueAtTime(1, T0 + bars * 4 * spb);
+    const d0 = on.pre(T0), d1 = on.pre(T0 + bars * 4 * spb);
+    on.input.gain.setValueAtTime(1, d0); on.input.gain.linearRampToValueAtTime(0.45, d0 + 0.02);
+    on.input.gain.setValueAtTime(0.45, d1 - 0.02); on.input.gain.linearRampToValueAtTime(1, d1);
     this._lit('chop');
     this.log(`${who || 'you'} → <b>live chops</b> of "${on.track.name}" for ${bars} bars`);
     return T0;

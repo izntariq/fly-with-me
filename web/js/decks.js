@@ -39,6 +39,7 @@ export class Mixer {
     try {
       await this.ctx.audioWorklet.addModule('js/keylock-worklet.js');
       for (const d of this.decks) d.keyNode = new AudioWorkletNode(this.ctx, 'keylock', { outputChannelCount: [2] });
+      this.keylockLatency = Math.round(1056 * this.ctx.sampleRate / 44100) / this.ctx.sampleRate;   // matches the worklet's L
       this.keylockReady = true;
     } catch (e) { this.keylockReady = false; }
     return this.keylockReady;
@@ -140,14 +141,19 @@ export class Deck {
   }
 
   get hasStems() { return !!this.track?.stems; }
+  // key lock delays what you hear by a fixed amount; everything before the shifter is scheduled that much earlier,
+  // so the audible deck lines up with rolls, scratches, the fly's synth and the sampler (which bypass it)
+  get lat() { return this.keylock ? (this.mixer.keylockLatency || 0) : 0; }
+  pre(t) { return Math.max(this.ctx.currentTime, t - this.lat); }
 
   play(at = this.ctx.currentTime, pos = this.anchorPos) {
     if (!this.track) return;
     this._stopSrc();
-    const startPos = Math.max(0, pos), when = Math.max(at, this.ctx.currentTime);
+    // `when` is when it will be heard; the source starts `lat` earlier (or now, and is heard `lat` later)
+    const startPos = Math.max(0, pos), when = Math.max(at, this.ctx.currentTime + this.lat), srcAt = this.pre(when);
     const mk = (buffer, dest) => {
       const s = this.ctx.createBufferSource();
-      s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(dest); s.start(when, startPos);
+      s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(dest); s.start(srcAt, startPos);
       return s;
     };
     this._syncPitch(when);
@@ -156,7 +162,7 @@ export class Deck {
     const src = this.srcs[0];
     src.onended = () => { if (this.src === src) { this.playing = false; this.anchorPos = this.duration; this.onEnded?.(this); } };
     this.src = src;
-    this.anchorCtx = Math.max(at, this.ctx.currentTime);
+    this.anchorCtx = srcAt + this.lat;
     this.anchorPos = startPos;
     this.playing = true;
   }
@@ -175,11 +181,13 @@ export class Deck {
   // route the deck through its key-lock pitch shifter (pitch = 1/rate cancels the vinyl-style pitch change)
   setKeylock(on) {
     if (!this.keyNode) return;
+    const wasPlaying = this.playing, resumeAt = this.ctx.currentTime + 0.06, resumePos = this.position(resumeAt);
     this.input.disconnect();
     if (on) { this.input.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
     else this.input.connect(this.low);
     this.keylock = on;
     this._syncPitch();
+    if (wasPlaying && this.track) this.play(resumeAt, resumePos);
   }
   _syncPitch(at = this.ctx.currentTime) {
     if (this.keyNode) this.keyNode.parameters.get('pitch').setValueAtTime(this.keylock ? 1 / this.rate : 1, at);
@@ -188,6 +196,7 @@ export class Deck {
   // mute / unmute a stem ('drums' | 'music') at ctx time `at` (short ramp, no click)
   setStem(name, on, at = this.ctx.currentTime) {
     const g = this.stemGain[name].gain;
+    at = this.pre(at);
     g.cancelScheduledValues(at); g.setValueAtTime(on ? 0 : 1, at); g.linearRampToValueAtTime(on ? 1 : 0, at + 0.012);
     const flip = () => { this.stemOn[name] = on; };
     if (at <= this.ctx.currentTime + 0.01) flip(); else setTimeout(flip, (at - this.ctx.currentTime) * 1000);
@@ -216,10 +225,9 @@ export class Deck {
 
   // --- FX (slip mode: the main track keeps running muted underneath) ---
   _duck(at, dur) {
-    this.input.gain.setValueAtTime(1, at);
-    this.input.gain.linearRampToValueAtTime(0, at + 0.004);
-    this.input.gain.setValueAtTime(0, at + dur - 0.004);
-    this.input.gain.linearRampToValueAtTime(1, at + dur);
+    const t = this.pre(at), g = this.input.gain;
+    g.setValueAtTime(1, t); g.linearRampToValueAtTime(0, t + 0.004);
+    g.setValueAtTime(0, t + dur - 0.004); g.linearRampToValueAtTime(1, t + dur);
   }
 
   // repeat a `slice`-beat chunk for `beats` beats starting at ctx time `at`
