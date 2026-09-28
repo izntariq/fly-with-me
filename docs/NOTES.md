@@ -150,7 +150,18 @@ sampler (horn, siren, laser, boom, riser, dhol roll) ─► limiter
   3. One silent beat where only the reverb tail rings.
   4. The drop: boom and air horn, jumping to the track's drop cue if it's within 16 bars.
 - **Tempo.** One master BPM drives every deck's playback rate (half and double time are folded). All decks change at
-  the same instant, so they stay phase-locked. Pitch changes with tempo; there's no time-stretching.
+  the same instant, so they stay phase-locked.
+- **Key lock** (`keylock-worklet.js`). Each deck passes through an AudioWorklet pitch shifter set to 1/rate. Two read
+  heads sweep a 50 ms delay line at `pitch` speed, crossfaded with Hann windows that sum to 1.
+  - Measured: 440 Hz stays at 441 Hz at +12% and −10%.
+  - Costs: ~25 ms of latency on the decks, and a little smearing of drum hits.
+- **Stems.** Demo tracks are synthesized into separate drums and music buffers with identical mastering
+  (`finishStems`). Dropped files go through harmonic–percussive separation in `stems-worker.js` (Fitzgerald 2010):
+  1. STFT (2048 samples / hop 512).
+  2. Median filter across 17 frames (sustained, harmonic sound) and across 17 frequency bins (hits, percussive).
+  3. Soft Wiener masks split each frame; drums are rebuilt by overlap-add, and music = original − drums, so the
+     stems add back up to the original exactly.
+  4. A 90 s track takes ~5 s. A deck playing a track with stems runs two synced sources with their own mute gains.
 
 ## 7. The fly's ears (`ears.js`)
 
@@ -212,6 +223,19 @@ between any two moves.
   change.
 - **Spike-written parts:** the Fred again.. chops and the Guetta 303 take their 16-step patterns straight from the
   last 16 brain frames. Busy frames play, quiet frames rest.
+
+**Set planner** (`setplan.js`).
+- **Arcs:** points of (fraction of the set, energy). While a set runs, epicness = 0.1 + 0.9 × energy.
+- **Track picks:** multiplied by 1.5 − |track intensity − energy one minute ahead|. Track intensity = 0.45 × tempo
+  + 0.3 × mean bar energy + 0.25 × style heat.
+- **Tempo:** leans up to ±2.5%.
+- **Peaks and dips:** crossing up through 0.9 triggers an 8-bar build in the current style; crossing down through
+  0.45 triggers drums out (or a sing-along without stems). A crossing that lands mid-move waits until the fly is free.
+
+**MC** (`mc.js`). Web Speech API.
+- The phrase is picked by the latest spike count; there are per-style lines, and quiet styles say nothing.
+- At most one shout per 20 s, except on drops.
+- It can't be recorded, because speech synthesis has no audio node to capture.
 
 **Track picking.**
 1. The off-air deck needs a record.
@@ -308,7 +332,8 @@ All testing was automated, with headless Chrome through `playwright-core`:
     feedback or from real DJ sets.
   - *Imitation from recordings:* analyse sets by great DJs (transition timing, effect use, phrase structure) and fit
     the readout to reproduce their choices.
-- Key-lock time-stretching (an AudioWorklet phase vocoder), so tempo changes don't shift pitch.
+- A cleaner key lock (phase vocoder / WSOLA) to remove the drum smear of the current shifter.
+- Vocal-only stems (a small source-separation model), a third and fourth deck.
 - More senses: vision (photoreceptors reaching the central brain needs longer runs), and smell once there's a stable
   way to drive the antennal lobe.
 - Stems or vocal isolation for true acapella mashups and drum-outs; a third and fourth deck (Carl Cox, SHM);

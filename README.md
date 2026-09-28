@@ -77,7 +77,9 @@ too with the pads or the keyboard. Everything is quantized to the beat.
 | Big-name moves | live chops `I` (Fred again..), double drop `[`, mashup `]`, loop layer `\` (Hawtin), stutter `;` (Skrillex), reverse `'`, bass tease `5`, hard cut `6`, 303 acid `` ` `` (Guetta), sing-along `/`, 1-bar kill (Fisher), pump (Alok), dub throw, resonant filter (Model 1), Pryda snare fill |
 | Sampler | air horn `Z`, dub siren `X`, laser `C`, boom `V`, riser `N`, dhol roll `M`, CO2 blast |
 | Hot cues | deck A `1`–`4`, deck B `7`–`0` (intro / build / drop / break; estimated from energy for your own tracks) |
-| Tempo | master BPM slider, `-` / `=` (⇧ for 0.1), TAP, ↺ back to the track's tempo; both decks follow and stay phase-locked. Pitch moves with tempo (no key-lock). |
+| Tempo | master BPM slider, `-` / `=` (⇧ for 0.1), TAP, ↺ back to the track's tempo; both decks follow and stay phase-locked; **key lock** keeps the pitch |
+| Stems | DRUMS / MUSIC mute per deck; drums out, strip to drums pads |
+| Set | set plan + length + Start set; 🎤 fly MC; 📝 Export set |
 
 **Play like…** Pick one of 29 DJ styles from the research, among them David Guetta, Martin Garrix, Tiësto, Calvin
 Harris, Swedish House Mafia, DJ Snake, Skrillex, Diplo, Steve Aoki, Armin van Buuren, Alok, Nucleya, Fred again..,
@@ -88,6 +90,28 @@ kill, Skrillex's hard cuts, Black Coffee's 32-bar blends…), which build (snare
 long a track stays on (Kaytranada ~30 s, Tiësto 1.5–2 min), its home tempo and its crowd hype. **Build style** can
 override the build. The styles are interpretations of the research, not recordings of anyone's set; see
 [`docs/DJ_RESEARCH.md`](docs/DJ_RESEARCH.md).
+
+**Stems.** Every track has a drums stem and a music stem. The demo tracks are rendered that way. Files you drop in
+are split in a background worker by harmonic–percussive separation, which takes about 5 s for a 90 s track, and the
+two stems add back up to the original exactly. Each deck has **DRUMS** / **MUSIC** mutes. The fly uses them for
+*drums out* (Nucleya's dhol drop-out, Calvin Harris and Fred again.. sing-alongs), *strip to drums* (Hawtin, Carl
+Cox), acapella-style mashups (the other deck's music stem) and percussion layering.
+
+**Set planner.** Pick an energy arc and a length: club night, warm-up, peak time, Guetta's festival yo-yo, Diplo's
+pop → heavy → pop, Kaytranada's beat tape, or a closing set. Then press **Start set**. The fly's epicness follows the
+arc, it picks tracks whose intensity matches where the arc is heading, the tempo leans with it, and it builds into
+the peaks and breaks down in the dips. A graph shows the plan, where you are, and how hard the fly actually played.
+
+**The fly on the mic.** With **🎤 fly MC** on, it shouts hype through the browser's speech voice: "Are you ready?"
+in builds, a shout on the drop, "Balle balle!" on desi tracks, and each DJ style's own lines. Its spikes pick the
+phrase. Styles whose DJs don't talk on the mic stay quiet. The MC is heard live but not captured by *Record set*.
+
+**Export set.** **📝 Export set** (also automatic when a recording stops) downloads a markdown report: style, plan,
+the tracklist with when and how each track came in, counts of what the fly did, and the full event log.
+
+**Key lock.** Like a CDJ's *master tempo*: with **key lock** on, tempo changes don't change pitch. Each deck runs
+through a real-time pitch shifter (an AudioWorklet). It measured 441 Hz for a 440 Hz tone at +12% and at −10%.
+With key lock on, DJ styles can move the tempo up to 20% and the fly can blend tracks up to 16% apart.
 
 **Track selection.** When the off-air deck needs a new record, the fly previews up to 3 candidates in its cue ear
 (about 4 s each, from their drop, like a DJ in headphones). It scores each by how hard that side's descending neurons
@@ -139,6 +163,10 @@ web/js/fx.js          master FX rack (sweeps, trans, crush, flanger, reverb) + s
 web/js/perform.js     DJ moves shared by fly and human: cue build & drop, drop swap, echo out, spin cut…
 web/js/flydj.js       neurons → DJ decisions: moves, transitions, track picking, adaptation
 web/js/djstyles.js    29 "play like" DJ styles from the research
+web/js/setplan.js     energy arcs for a whole set, track intensity
+web/js/mc.js          the fly on the mic (speech synthesis)
+web/js/stems-worker.js drums / music separation for dropped tracks (web worker)
+web/js/keylock-worklet.js key-lock pitch shifter (AudioWorklet)
 web/js/ears.js        audio spectrum → Johnston's organ drive, habituation
 web/js/synth.js       neurons → notes (club synth, or dhol + sitar) + MIDI out
 web/js/tracks.js      club demo tracks, BPM/beat detection, hot cues

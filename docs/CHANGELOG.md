@@ -114,3 +114,29 @@ The history was rebuilt from the session transcript (see [GIT.md](GIT.md)) and t
   - CO2 blast, snare-roll / stutter / filter builds, downlifter
   - mids-only reverb, as Swedish House Mafia do it
 - A build-style selector and pads for everything.
+
+## v1.7 — stems
+- Every deck gets drums and music stems:
+  - demo tracks are rendered as stems
+  - dropped files are split by harmonic–percussive separation in a web worker (~5 s for 90 s of audio; the stems
+    add back up to the original exactly)
+- DRUMS / MUSIC mutes on each deck.
+- New moves: *drums out* and *strip to drums*. Mashups, loop layers and live chops now use the stems.
+
+## v1.8 — set planner
+- Energy arcs for a whole set: club night, warm-up, peak time, Guetta's yo-yo, Diplo's pop → heavy → pop,
+  Kaytranada's beat tape, closing.
+- While a set runs:
+  - epicness follows the arc, and track picks match its intensity
+  - the tempo leans with it
+  - builds happen at peaks, breakdowns in dips
+- Live graph of the plan and of what the fly actually did.
+
+## v1.9 — the fly on the mic, set export
+- Speech-synthesis MC with per-style lines ("Balle balle!" for desi); the fly's spikes pick the phrase.
+- Markdown set report: tracklist with how each track came in, move counts, full log.
+- Builds default to the chosen style's build.
+
+## v1.10 — key lock
+- AudioWorklet pitch shifter per deck, so tempo no longer changes pitch (440 Hz stays at 441 Hz at +12% / −10%).
+- with key lock on, styles can move the tempo up to 20% and blends can span 16%.

@@ -87,9 +87,14 @@ long a track stays on, its home tempo, and what it hypes the crowd with.
 | Bass tease | Nucleya (dhol drop-out), Fisher | Bass cut for a bar, slammed back on the downbeat |
 | Reverse, hard cut | Skrillex, DJ Snake, Kaytranada | Reverse the next beat; cut on the bar with no effect |
 
-**Not built yet** (possible next steps): stem separation for true acapellas and drum-outs; a third and fourth deck;
-key-shifting acapellas to match; a half-time/double-time switch; energy-arc scheduling for a whole set (Diplo:
-pop → heavy → pop; Guetta's yo-yo); Kaytranada's swing; a vocal "mic hype" sample.
+**Built since (v1.7–v1.10):**
+- Stems (drums / music) with drums-out, strip-to-drums and acapella-style mashups
+- Energy-arc set planning (Diplo pop → heavy → pop, Guetta's yo-yo, club night, beat tape…)
+- A mic-hype MC
+- Key lock
+
+**Not built yet:** vocal-only stems (the music stem still contains instruments); a third and fourth deck; key-shifting
+acapellas to match; a half-time/double-time switch; Kaytranada's swing.
 
 ---
 
