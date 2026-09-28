@@ -76,7 +76,8 @@ function renderCrate() {
     const li = document.createElement('li');
     if (!inStyle(t)) li.style.opacity = 0.35;
     if (A?.track === t) li.className = 'a'; else if (B?.track === t) li.className = 'b';
-    li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${i === nextIdx ? ' · next' : ''}</span>`;
+    const score = t.score != null ? ` · 🎧 ${t.score.toFixed(0)}` : '';
+    li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${score}${t.plays ? ` · played ${t.plays}×` : ''}${i === nextIdx && !S.dj?.auto ? ' · next' : ''}</span>`;
     ol.append(li);
   });
 }
@@ -95,21 +96,49 @@ function loadNext(i) {
   const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
   const t = pickNext([deck.track, other.track]) || (deck.track ? null : S.crate[0]);
   if (!t) { if (deck.track && !deck.playing) startSynced(deck, other); return; }
+  loadTrack(i, t);
+}
+
+function loadTrack(i, t, why = '') {
+  const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
   deck.load(t);
   startSynced(deck, other);
   S.ears.resetHabit(i);
+  t.plays = (t.plays || 0) + 1;
   deck._manualEQ = false; deck.setEQ('low', 0); deck.setEQ('mid', 0); deck.setEQ('high', 0);
-  log(`deck ${deck.name} ← "${t.name}" (${t.bpm.toFixed(1)} bpm${other.playing ? ', beat-matched to deck ' + other.name : ''})`);
+  log(`deck ${deck.name} ← "${t.name}" (${t.bpm.toFixed(1)} bpm${other.playing ? ', beat-matched to deck ' + other.name : ''})${why}`);
   renderCrate();
 }
 
-function startSynced(deck, other) {
+// the fly's headphone preview: play a candidate from its drop in the off-air deck (heard only in the cue ear)
+function previewTrack(i, t) {
+  const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
+  deck.load(t);
+  const drop = t.cues?.find((c) => c.name === 'drop');
+  startSynced(deck, other, drop ? t.firstBeat + drop.beat * 60 / t.bpm : t.firstBeat);
+  S.ears.resetHabit(i);
+  renderCrate();
+}
+
+// tracks the fly could play next on deck i: in style, not on a deck, least-played first (crate order breaks ties)
+function candidates(i, n) {
+  const onDecks = S.mixer.decks.map((d) => d.track);
+  const pool = [];
+  for (let k = 0; k < S.crate.length; k++) {
+    const t = S.crate[(S.crateNext + k) % S.crate.length];
+    if (inStyle(t) && !onDecks.includes(t)) pool.push(t);
+  }
+  pool.sort((a, b) => (a.plays || 0) - (b.plays || 0));
+  return pool.slice(0, n);
+}
+
+function startSynced(deck, other, startPos = null) {
   const t = deck.track;
   if (other.playing && other.track) {
     deck.rate = S.mixer.rateFor(t, S.mixer.masterBpm || other.bpm);
     const b = other.beatAt(S.ctx.currentTime + 0.15);
     const bar = Math.ceil(b / 4) * 4;
-    deck.play(other.timeOfBeat(bar), t.firstBeat);
+    deck.play(other.timeOfBeat(bar), startPos ?? t.firstBeat);
   } else {
     deck.rate = S.mixer.masterBpm ? S.mixer.rateFor(t, S.mixer.masterBpm) : 1;
     deck.play(S.ctx.currentTime + 0.05, deck.anchorPos || t.firstBeat);
@@ -146,6 +175,7 @@ async function start() {
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
   S.dj.onLoadNext = loadNext;
+  S.dj.picker = { candidates, preview: previewTrack, choose: (i, t, why) => loadTrack(i, t, why) };
   mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5) loadNext(i); }; });
   buildMoves();
   bindDeckUI();
@@ -407,6 +437,7 @@ function toggleRecord() {
   $('#btn-rec').textContent = '■ Stop recording'; $('#rec-status').textContent = 'recording…';
 }
 
-window.flyDJ = S;   // handy for poking at it from the devtools console
+window.flyDJ = S;
+window.renderCrate = () => renderCrate();   // handy for poking at it from the devtools console
 bindGlobalUI();
 connect();

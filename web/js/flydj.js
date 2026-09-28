@@ -58,7 +58,9 @@ export class FlyDJ {
     this.pending = null;      // {at, style, dir} transition scheduled on a phrase line
     this.userHold = 0;        // seconds of manual crossfader override remaining
     this.voiceLevel = 0.6;
-    this.onLoadNext = null;   // (deckIdx) => void
+    this.onLoadNext = null;   // (deckIdx) => void  (plain crate order, used when the fly isn't choosing)
+    this.picker = null;       // {candidates(i, n), preview(i, track), choose(i, track, why)}
+    this.aud = null;          // headphone audition in progress
     this.offAirSince = [0, 0];
     this.onAirSince = 0;
     this.lastAny = -1e9; this.lastBuild = -1e9; this.lastHorn = -1e9;
@@ -79,6 +81,8 @@ export class FlyDJ {
       if (this.sideOf[s] < 0) L += w; else if (this.sideOf[s] > 0) R += w;
     }
     const now = this.mixer.ctx.currentTime, beat = this.beat();
+    const a = this.aud;
+    if (a && now - a.t0 > 1.2) { a.acc += a.deck === 0 ? L : R; a.n += dt; }
     this.moves.forEach((m, k) => {
       const hz = counts[k] / dt / Math.max(1, m.slots.length);
       m.fast += (hz - m.fast) * Math.min(1, dt / 0.3);
@@ -203,7 +207,8 @@ export class FlyDJ {
 
     // 2. decide whether to leave the on-air deck
     const endingSoon = onAir.playing && onAir.duration - onAir.position() < 40 * beatLen;
-    if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy()) {
+    if (this.aud) this.tickAudition(now);
+    if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud) {
       const onIdx = onAir === A ? 0 : 1, dir = onAir === A ? 1 : -1;
       const wants = this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3;
       if (wants || endingSoon) {
@@ -236,8 +241,46 @@ export class FlyDJ {
       if (!off) { this.offAirSince[i] = 0; return; }
       this.offAirSince[i] += dt;
       const spent = !d.track || !d.playing || d.position() > d.duration * 0.55;
-      if (this.offAirSince[i] > 3 && spent && !this.pending) { this.offAirSince[i] = -1e9; this.onLoadNext?.(i); }
+      if (this.offAirSince[i] > 3 && spent && !this.pending && !this.aud) {
+        this.offAirSince[i] = -1e9;
+        if (this.picker) this.startAudition(i); else this.onLoadNext?.(i);
+      }
     });
+  }
+
+  // ---------------- track selection: preview candidates in the cue ear, keep the one the brain responds to most
+  startAudition(i) {
+    const cands = this.picker.candidates(i, 3);
+    if (cands.length <= 1) { if (cands.length) this.picker.choose(i, cands[0]); else this.onLoadNext?.(i); return; }
+    this.aud = { deck: i, cands, k: -1, scores: [] };
+    this.log(`🎧 the fly cues up ${cands.length} tracks in its ${i === 0 ? 'left' : 'right'} ear to pick the next one`);
+    this.nextCandidate();
+  }
+  nextCandidate() {
+    const a = this.aud;
+    a.k++;
+    if (a.k >= a.cands.length) return this.finishAudition();
+    a.t0 = this.mixer.ctx.currentTime; a.acc = 0; a.n = 0;
+    this.picker.preview(a.deck, a.cands[a.k]);
+  }
+  tickAudition(now) {
+    const a = this.aud, deck = this.mixer.decks[a.deck];
+    if (this.mixer.airness(deck) > 0.01) { this.aud = null; return; }   // someone brought this deck on air: stop auditioning
+    if (now - a.t0 < 5) return;
+    const t = a.cands[a.k];
+    t.score = a.acc / Math.max(0.1, a.n);          // spikes/s from that side's descending neurons
+    a.scores.push(t.score);
+    window.renderCrate?.();
+    this.nextCandidate();
+  }
+  finishAudition() {
+    const a = this.aud;
+    this.aud = null;
+    // brain response, discounted for tracks it has already played
+    const val = a.cands.map((t, k) => a.scores[k] / (1 + 0.35 * (t.plays || 0)));
+    const best = val.indexOf(Math.max(...val));
+    const summary = a.cands.map((t, k) => `${t.name} ${a.scores[k].toFixed(0)}`).join(' · ');
+    this.picker.choose(a.deck, a.cands[best], ` — <b>the fly's pick</b> (🎧 ${summary} spikes/s)`);
   }
 
   // classic bass swap: incoming deck's lows stay killed until the fader passes the middle

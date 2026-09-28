@@ -68,6 +68,11 @@ too with the pads or the keyboard. Everything is quantized to the beat.
 | Hot cues | deck A `1`–`4`, deck B `7`–`0` (intro / build / drop / break; estimated from energy for your own tracks) |
 | Tempo | master BPM slider, `-` / `=` (⇧ for 0.1), TAP, ↺ back to the track's tempo; both decks follow and stay phase-locked. Pitch moves with tempo (no key-lock). |
 
+**Track selection.** When the off-air deck needs a new record, the fly previews up to 3 candidates in its cue ear
+(about 4 s each, from their drop, like a DJ in headphones). It scores each by how hard that side's descending neurons
+fire, discounts tracks it has already played, and loads the winner from the intro. Scores show in the crate (🎧).
+Turn autopilot off and it goes back to crate order.
+
 **The fly as DJ.** Transitions start on 16-beat phrase lines, and the style is picked by whichever neuron group is most
 excited at that moment: giant fiber → drop swap, echo group → echo out, aversion neurons → spinback cut, calm → long
 EQ blend with bass swap. A surge across all ~1,300 descending neurons triggers a cue build & drop. With *fly rides the
