@@ -5,6 +5,7 @@ import { FlyDJ } from './flydj.js';
 import { Performer } from './perform.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
 import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
+import { analyzeEnergy } from './analysis.js';
 import { renderDesi, desiCount } from './desi.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -275,6 +276,19 @@ function bindDeckUI() {
              habit: $('.habit div', root), play: $('.btn-play', root) };
     d.ui.play.onclick = () => { if (d.playing) d.stop(); else if (d.track) startSynced(d, S.mixer.decks[1 - i]); else loadNext(i); };
     $('.btn-next', root).onclick = () => loadNext(i);
+    // fix a wrong tempo detection: rescale the beat grid (the first beat stays put)
+    const rescale = (f) => {
+      const t = d.track; if (!t) return;
+      t.bpm *= f;
+      if (t.cues) t.cues = t.cues.map((c) => ({ ...c, beat: Math.round(c.beat * f) }));
+      t.energy = analyzeEnergy(t.buffer, t.bpm, t.firstBeat).energy;
+      if (t.source === 'file' && t.style !== 'desi') t.style = t.bpm >= 155 ? 'dnb' : t.bpm < 108 ? 'hiphop' : t.style === 'dnb' || t.style === 'hiphop' ? 'club' : t.style;
+      d.setRate(S.mixer.rateFor(t, S.mixer.masterBpm || t.bpm));
+      log(`deck ${d.name}: "${t.name}" tempo corrected to ${t.bpm.toFixed(1)} BPM (${t.style})`);
+      renderCrate();
+    };
+    $('.btn-half', root).onclick = () => rescale(0.5);
+    $('.btn-double', root).onclick = () => rescale(2);
     for (const band of ['high', 'mid', 'low']) {
       const inp = $(`.eq-${band}`, root);
       inp.oninput = () => { d._manualEQ = true; d.setEQ(band, +inp.value); };

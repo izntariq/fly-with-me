@@ -61,6 +61,19 @@ async function detectBeat(buffer) {
   // 85–175 covers hip-hop through drum & bass without folding
   let [bpm] = best(85, 175, 0.5);
   let phase; [bpm, phase] = best(bpm - 0.6, bpm + 0.6, 0.02);
+  // half-tempo check (drum & bass often reads as 86): if the full-band hits (snares, hats) land on the
+  // off-beats about as hard as on the beats, the real tempo is double
+  if (bpm < 110) {
+    const full = buffer.getChannelData(0), fh = Math.round(buffer.sampleRate / fps);
+    const envF = new Float32Array(nF); let pf = 0;
+    for (let f = 0; f < nF; f++) {
+      let e = 0; for (let i = f * fh, end = Math.min(full.length, i + fh); i < end; i += 4) e += full[i] * full[i];
+      e = Math.sqrt(e / (fh / 4)); envF[f] = Math.max(0, e - pf); pf = e;
+    }
+    const combF = (ph) => { const per = fps * 60 / bpm; let s = 0, n = 0; for (let p = ph; p < nF - 1; p += per) { s += envF[Math.floor(p)]; n++; } return s / Math.max(1, n); };
+    const onB = combF(phase), offB = combF(phase + fps * 30 / bpm);
+    if (offB > 0.75 * onB) bpm *= 2;
+  }
   return { bpm: Math.round(bpm * 100) / 100, firstBeat: phase / fps };
 }
 
