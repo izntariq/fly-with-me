@@ -10,8 +10,17 @@ play a synth and work a two-deck DJ mixer.
 ./run.sh            # starts the brain server and opens http://localhost:8765
 ```
 
-Press **Start the fly**. Two built-in demo tracks load right away. Drop your own audio files anywhere on the page to
-add them to the crate; tempo and beat grid are detected automatically.
+Press **Start the fly**. A crate of 8 synthesized demo tracks (4 desi, 4 club techno) is ready right away. Drop
+your own audio files anywhere on the page to add them to the crate; tempo, key, style and structure are detected
+automatically.
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [`docs/NOTES.md`](docs/NOTES.md) | Comprehensive project notes: how every part works, the neuroscience, measured findings, design decisions, limitations, testing, ideas |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every version from the first line of code, with what changed and why |
+| [`docs/GIT.md`](docs/GIT.md) | Git explainer: how this history is organised and how to browse, compare, run and restore any version |
 
 ## What's actually happening
 
@@ -112,12 +121,18 @@ everything in between. The raster shows all 1,409 output neurons over the last 4
 flybrain/brain.py     Numba LIF simulator (Shiu et al. model)
 flybrain/mapping.py   sensory inputs / DN+MN outputs from FlyWire annotations
 flybrain/server.py    aiohttp server: runs the brain in real time, streams spikes over WebSocket
-web/js/decks.js       two decks, EQ, filter, loop roll, echo, backspin, crossfader
+web/js/main.js        wiring: connection, crate, control loop, UI, keyboard, tempo
+web/js/decks.js       two decks: EQ, filter, rolls, scratching, brake, hot cues; crossfader; master bus
+web/js/fx.js          master FX rack (sweeps, trans, crush, flanger, reverb) + sampler (horn, siren, boom…)
+web/js/perform.js     DJ moves shared by fly and human: cue build & drop, drop swap, echo out, spin cut…
+web/js/flydj.js       neurons → DJ decisions: moves, transitions, track picking, adaptation
 web/js/ears.js        audio spectrum → Johnston's organ drive, habituation
-web/js/flydj.js       neurons → DJ moves
-web/js/synth.js       neurons → notes (+ MIDI)
-web/js/tracks.js      demo tracks (synthesized), BPM/beat detection
-web/js/viz.js         brain map, raster, meters
+web/js/synth.js       neurons → notes (club synth, or dhol + sitar) + MIDI out
+web/js/tracks.js      club demo tracks, BPM/beat detection, hot cues
+web/js/desi.js        desi demo tracks: dhol, tabla, dholak, tumbi, sitar, tanpura, harmonium
+web/js/analysis.js    key / Camelot, style and energy analysis of new music
+web/js/viz.js         brain map, raster, ears, waveforms
+docs/                 notes, changelog, git explainer
 vendor/               Shiu et al. model + FlyWire v783 connectivity (cloned by run.sh)
 data/                 FlyWire annotations + caches (downloaded/generated)
 ```
