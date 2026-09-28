@@ -15,8 +15,8 @@
 //               -> fly synth voice swells
 
 export const MOVES = [
-  { key: 'escape', label: 'Giant fiber', types: ['DNp01'], action: 'beat-roll stutter', ratio: 2.2, min: 6, cool: 8 },
-  { key: 'echo', label: 'DNp02 · DNp06 · DNp11 · DNp55', types: ['DNp02', 'DNp06', 'DNp11', 'DNp55'], action: 'echo throw', ratio: 2.0, min: 8, cool: 8 },
+  { key: 'escape', label: 'Giant fiber', types: ['DNp01'], action: 'beat-roll stutter', ratio: 2.2, min: 6, cool: 16 },
+  { key: 'echo', label: 'DNp02 · DNp06 · DNp11 · DNp55', types: ['DNp02', 'DNp06', 'DNp11', 'DNp55'], action: 'echo throw', ratio: 2.0, min: 8, cool: 16 },
   { key: 'reject', label: 'Aversion: DNp42 · DNpe007 · DNge067 · MDN', types: ['DNp42', 'DNpe007', 'DNge067', 'MDN'], action: 'backspin → switch deck', ratio: 3, min: 10, cool: 32 },
   { key: 'filtL', label: 'Left DNp12 · DNb05 · DNg56', types: ['DNp12', 'DNb05', 'DNg56'], side: 'left', action: 'deck A high-pass', continuous: true },
   { key: 'filtR', label: 'Right DNp12 · DNb05 · DNg56', types: ['DNp12', 'DNb05', 'DNg56'], side: 'right', action: 'deck B high-pass', continuous: true },
@@ -77,7 +77,8 @@ export class FlyDJ {
     this.R += (R / dt - this.R) * Math.min(1, dt / 2);
     const raw = (this.R - this.L) / (this.R + this.L + 40);
     this.t += dt;
-    this.bias += (raw - this.bias) * dt / Math.min(240, 20 + this.t);   // cancel fixed left/right wiring asymmetry
+    // cancel the fixed left/right asymmetry of the wiring (fast during the first 20 s of listening)
+    this.bias += (raw - this.bias) * dt / (this.t < 20 ? 2 : Math.min(240, this.t));
     this.pref = Math.max(-1, Math.min(1, (raw - this.bias) * 2));
   }
 
@@ -124,9 +125,12 @@ export class FlyDJ {
     const endingSoon = onAir.playing && onAir.duration - onAir.position() < 32 * 60 / onAir.bpm;
     if (this.forceSpeed > 0 && bothPlaying) {
       v = this.commit * this.forceSpeed;
-    } else if (bothPlaying) {
+    } else if (bothPlaying && this.t > 20) {
       const p = this.pref, dz = 0.12;
       if (Math.abs(p) > dz) v = (p - Math.sign(p) * dz) * 0.2;
+      // the fly only leaves a track once it has started to tune it out
+      const onIdx = onAir === A ? 0 : 1, leaving = (onAir === A && v > 0) || (onAir === B && v < 0);
+      if (leaving && (x <= 0.001 || x >= 0.999) && this.ears.habit[onIdx] < 0.3) v = 0;
       if (x > 0.12 && x < 0.88) {
         // mid-transition: commit and finish it unless the fly strongly changes its mind
         if (!this.commit) this.commit = Math.sign(v || (x < 0.5 ? 1 : -1));

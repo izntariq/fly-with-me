@@ -76,7 +76,7 @@ function renderCrate() {
 function pickNext(exclude) {
   for (let k = 0; k < S.crate.length; k++) {
     const t = S.crate[(S.crateNext + k) % S.crate.length];
-    if (!exclude.includes(t)) { S.crateNext = (S.crateNext + k + 1) % S.crate.length; return t; }
+    if (!exclude.includes(t)) { S.crateNext += k + 1; return t; }
   }
   return null;
 }
@@ -114,7 +114,7 @@ async function addFiles(files) {
     log(`analysing "${f.name}"…`);
     try {
       const t = await trackFromFile(S.ctx, f);
-      S.crate.splice(S.crateNext, 0, t);   // user tracks play next
+      S.crate.splice(S.crateNext % (S.crate.length + 1), 0, t);   // user tracks play next
       log(`crate + "${t.name}" (${t.bpm.toFixed(1)} bpm detected)`);
       renderCrate();
     } catch (e) { log(`could not decode "${f.name}": ${e.message}`); }
