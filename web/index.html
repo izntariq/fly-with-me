@@ -45,6 +45,7 @@
         <button class="btn-play">▶</button>
         <button class="btn-next" title="load next track from crate">⏭</button>
       </div>
+      <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 1">Intro<kbd>1</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 2">Build<kbd>2</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 3">Drop<kbd>3</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 4">Break<kbd>4</kbd></button></div>
       <div class="knobs">
         <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
         <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
@@ -77,11 +78,65 @@
         <button class="btn-play">▶</button>
         <button class="btn-next" title="load next track from crate">⏭</button>
       </div>
+      <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 7">Intro<kbd>7</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 8">Build<kbd>8</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 9">Drop<kbd>9</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 0">Break<kbd>0</kbd></button></div>
       <div class="knobs">
         <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
         <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
         <label>LOW<input type="range" class="eq-low" min="-24" max="6" step="0.5" value="0"></label>
         <label>FILTER<input type="range" class="filter" min="-1" max="1" step="0.01" value="0"></label>
+      </div>
+    </div>
+  </section>
+
+
+  <section class="panel perf">
+    <div class="perf-head">
+      <h3>Performance <span class="dim">(the fly fires these from its neurons; you can too — click or use the keys)</span></h3>
+      <div class="perf-opts">
+        <label>Epicness<input type="range" id="epic" min="0" max="1" step="0.01" value="0.6"></label>
+        <div class="beats" id="beats" title="length of FX throws">
+          <span>FX length</span>
+          <button data-b="0.5">½</button><button data-b="1" class="sel">1</button><button data-b="2">2</button><button data-b="4">4</button><button data-b="8">8</button>
+        </div>
+      </div>
+    </div>
+    <div class="pads">
+      <div class="pad-group"><h4>Beat FX</h4>
+        <button class="pad" data-act="fx:echo">Echo<kbd>Q</kbd></button>
+        <button class="pad" data-act="fx:reverb">Reverb<kbd>W</kbd></button>
+        <button class="pad" data-act="fx:flanger">Flanger<kbd>E</kbd></button>
+        <button class="pad" data-act="fx:trans">Trans<kbd>R</kbd></button>
+        <button class="pad" data-act="fx:crush">Crush<kbd>T</kbd></button>
+        <button class="pad" data-act="fx:lpf">LPF dip<kbd>Y</kbd></button>
+        <button class="pad" data-act="fx:sweep">HPF sweep<kbd>U</kbd></button>
+      </div>
+      <div class="pad-group"><h4>Rolls &amp; scratch</h4>
+        <button class="pad" data-act="roll:0.25">Roll ¼<kbd>A</kbd></button>
+        <button class="pad" data-act="roll:0.125">Roll ⅛<kbd>S</kbd></button>
+        <button class="pad" data-act="roll:0.0625">Roll 1/16<kbd>D</kbd></button>
+        <button class="pad" data-act="scratch:baby">Baby<kbd>F</kbd></button>
+        <button class="pad" data-act="scratch:chirp">Chirp<kbd>G</kbd></button>
+        <button class="pad" data-act="scratch:transformer">Transform<kbd>H</kbd></button>
+        <button class="pad" data-act="scratch:flare">Flare<kbd>J</kbd></button>
+      </div>
+      <div class="pad-group"><h4>Moves</h4>
+        <button class="pad big-pad" data-act="build:4">BUILD &amp; DROP<kbd>space</kbd></button>
+        <button class="pad" data-act="build:8">8-bar build<kbd>⇧ space</kbd></button>
+        <button class="pad" data-act="dropswap">Drop swap<kbd>B</kbd></button>
+        <button class="pad" data-act="echoout">Echo out<kbd>O</kbd></button>
+        <button class="pad" data-act="spincut">Spin cut<kbd>P</kbd></button>
+        <button class="pad" data-act="brake">Tape stop<kbd>K</kbd></button>
+        <button class="pad" data-act="backspin">Spinback<kbd>L</kbd></button>
+        <button class="pad" data-act="jump:-4">Jump −4<kbd>,</kbd></button>
+        <button class="pad" data-act="jump:4">Jump +4<kbd>.</kbd></button>
+      </div>
+      <div class="pad-group"><h4>Sampler</h4>
+        <button class="pad" data-act="sample:horn">📯 Air horn<kbd>Z</kbd></button>
+        <button class="pad" data-act="sample:siren">Siren<kbd>X</kbd></button>
+        <button class="pad" data-act="sample:laser">Laser<kbd>C</kbd></button>
+        <button class="pad" data-act="sample:boom">Boom<kbd>V</kbd></button>
+        <button class="pad" data-act="sample:riser">Riser<kbd>N</kbd></button>
+        <button class="pad" data-act="sample:dhol">Dhol roll<kbd>M</kbd></button>
       </div>
     </div>
   </section>

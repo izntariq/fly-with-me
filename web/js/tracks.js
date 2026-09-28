@@ -61,11 +61,31 @@ async function detectBeat(buffer) {
   return { bpm: Math.round(bpm * 100) / 100, firstBeat: phase / fps };
 }
 
+// Hot cues on phrase lines, from the per-bar energy: the biggest jump is the drop, the quietest stretch after it the break.
+export function findCues(buffer, bpm, firstBeat) {
+  const d = buffer.getChannelData(0), sr = buffer.sampleRate, barLen = 4 * 60 / bpm;
+  const nBars = Math.floor((buffer.duration - firstBeat) / barLen), E = [];
+  for (let b = 0; b < nBars; b++) {
+    let s = 0, n = 0;
+    for (let i = Math.floor((firstBeat + b * barLen) * sr), e = i + Math.floor(barLen * sr); i < e; i += 16) { s += d[i] * d[i]; n++; }
+    E.push(Math.sqrt(s / n));
+  }
+  const mean = (a, b) => { let s = 0; for (let i = Math.max(0, a); i < Math.min(nBars, b); i++) s += E[i]; return s / Math.max(1, Math.min(nBars, b) - Math.max(0, a)); };
+  let drop = Math.min(16, nBars - 1), best = -1;
+  for (let b = 8; b < nBars - 4; b += 4) { const j = mean(b, b + 4) - mean(b - 4, b); if (j > best) { best = j; drop = b; } }
+  let brk = Math.min(nBars - 4, drop + 16), low = Infinity;
+  for (let b = drop + 8; b < nBars - 4; b += 4) { const m = mean(b, b + 4); if (m < low) { low = m; brk = b; } }
+  return [{ name: 'intro', beat: 0 }, { name: 'build', beat: Math.max(0, drop - 8) * 4 }, { name: 'drop', beat: drop * 4 }, { name: 'break', beat: brk * 4 }];
+}
+
+// the arrangement every demo track uses: intro 8 | build 8 | main 16 | break 4 | main 8 | outro 4 (bars)
+export const DEMO_CUES = [{ name: 'intro', beat: 0 }, { name: 'build', beat: 32 }, { name: 'drop', beat: 64 }, { name: 'break', beat: 128 }, { name: 'drop 2', beat: 144 }];
+
 export async function trackFromFile(ctx, file) {
   const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
   const { bpm, firstBeat } = await detectBeat(buffer);
   return { name: file.name.replace(/\.[^.]+$/, ''), buffer, bpm, firstBeat, root: null, scale: null,
-           peaks: peaks(buffer), source: 'file' };
+           peaks: peaks(buffer), source: 'file', cues: findCues(buffer, bpm, firstBeat) };
 }
 
 // ---------- demo tracks, rendered offline so the fly has something to play with out of the box ----------
@@ -176,5 +196,5 @@ export async function renderDemo(i) {
   const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: sr });
   buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
   return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.scale, peaks: peaks(buffer),
-           source: 'demo', style: 'club', key: `${noteName(D.root)} ${D.scale}` };
+           source: 'demo', style: 'club', key: `${noteName(D.root)} ${D.scale}`, cues: DEMO_CUES };
 }

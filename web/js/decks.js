@@ -1,6 +1,7 @@
-// Two-deck DJ mixer: per-deck EQ, filter, loop roll, echo throw, backspin; equal-power crossfader.
+// Two-deck DJ mixer: per-deck EQ, filter, loop roll, echo throw, backspin, scratching, brake, hot cues;
+// equal-power crossfader; master bus runs through the FX rack.
 
-const dbToGain = (db) => Math.pow(10, db / 20);
+import { FXRack, Sampler } from './fx.js';
 
 export class Mixer {
   constructor(ctx) {
@@ -13,6 +14,10 @@ export class Mixer {
     this.master.connect(limiter);
     limiter.connect(ctx.destination);
     this.out = limiter; // tap for recording / room ears
+    // master bus goes through the FX rack before the limiter
+    this.master.disconnect();
+    this.fx = new FXRack(ctx, limiter);
+    this.master.connect(this.fx.in);
 
     // echo bus (dotted-eighth delay, tempo-synced by setTempo)
     this.echoIn = ctx.createGain();
@@ -23,12 +28,15 @@ export class Mixer {
     hp.connect(this.master);
     this.setTempo(124);
 
+    this.sampler = new Sampler(ctx, limiter, this.echoIn);
     this.decks = [new Deck(ctx, 'A', this), new Deck(ctx, 'B', this)];
+    this.lockUntil = 0;   // a scheduled cut owns the crossfader until then
     this.x = 0; // 0 = full A, 1 = full B
     this.setCrossfader(0);
   }
   setTempo(bpm) {
     this.bpm = bpm;
+    if (this.fx) this.fx.bpm = bpm;
     this.delay.delayTime.setTargetAtTime(0.75 * 60 / bpm, this.ctx.currentTime, 0.05);
   }
   setCrossfader(x) {
@@ -36,6 +44,15 @@ export class Mixer {
     const t = this.ctx.currentTime;
     this.decks[0].xf.gain.setTargetAtTime(Math.cos(this.x * Math.PI / 2), t, 0.02);
     this.decks[1].xf.gain.setTargetAtTime(Math.sin(this.x * Math.PI / 2), t, 0.02);
+  }
+  // hard cut of the crossfader at an exact (beat-aligned) time
+  cutTo(x, at) {
+    const [A, B] = this.decks;
+    A.xf.gain.cancelScheduledValues(at); B.xf.gain.cancelScheduledValues(at);
+    A.xf.gain.setValueAtTime(Math.cos(x * Math.PI / 2), at);
+    B.xf.gain.setValueAtTime(Math.sin(x * Math.PI / 2), at);
+    this.lockUntil = at + 0.05;
+    setTimeout(() => { this.x = x; }, Math.max(0, (at - this.ctx.currentTime) * 1000));
   }
   onAir() { return this.x < 0.5 ? this.decks[0] : this.decks[1]; }
   offAir() { return this.x < 0.5 ? this.decks[1] : this.decks[0]; }
@@ -149,14 +166,16 @@ export class Deck {
   }
 
   // repeat a `slice`-beat chunk for `beats` beats starting at ctx time `at`
-  loopRoll(at, slice = 0.25, beats = 1) {
+  // (pos: where to grab the loop, default = wherever the track is at `at`; rise: pitch multiplier reached at the end)
+  loopRoll(at, slice = 0.25, beats = 1, pos = null, rise = 1) {
     if (!this.track || !this.playing) return;
     const spb = 60 / this.track.bpm;
-    const pos = this.position(at);
+    pos = pos ?? this.position(at);
     const src = this.ctx.createBufferSource();
     src.buffer = this.track.buffer;
     src.loop = true; src.loopStart = pos; src.loopEnd = pos + slice * spb;
-    src.playbackRate.value = this.rate;
+    src.playbackRate.setValueAtTime(this.rate, at);
+    if (rise !== 1) src.playbackRate.linearRampToValueAtTime(this.rate * rise, at + beats * spb / this.rate);
     const env = this.ctx.createGain();
     src.connect(env); env.connect(this.fxIn);
     const dur = beats * spb / this.rate;
@@ -171,6 +190,68 @@ export class Deck {
     g.setValueAtTime(0, at); g.linearRampToValueAtTime(0.9, at + 0.01);
     g.setValueAtTime(0.9, at + beats * spb); g.linearRampToValueAtTime(0, at + beats * spb + 0.02);
   }
+
+  get reversed() {
+    const t = this.track;
+    if (!t.rev) {
+      const b = t.buffer, r = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate);
+      for (let c = 0; c < b.numberOfChannels; c++) { const s = b.getChannelData(c), d = r.getChannelData(c); for (let i = 0, n = s.length; i < n; i++) d[i] = s[n - 1 - i]; }
+      t.rev = r;
+    }
+    return t.rev;
+  }
+
+  // position (seconds) of beat index b of the track
+  posOfBeat(b) { return this.track.firstBeat + b * 60 / this.track.bpm; }
+
+  // turntablism: strokes back and forth over the beat under the needle, with crossfader patterns
+  //   baby: plain back-and-forth   chirp: fader closes on each stroke end   transformer: fader chops 1/16s   flare: one click per stroke
+  scratch(at, kind = 'baby', beats = 2) {
+    if (!this.track || !this.playing) return;
+    const spb = 60 / this.track.bpm / this.rate, dur = beats * spb;
+    const p = this.posOfBeat(Math.floor(this.beatAt(at)));         // the hit on the current beat
+    const len = 0.11;                                                 // seconds of record under the hand per stroke
+    const strokeDur = kind === 'chirp' ? spb / 4 : spb / 2;
+    const rev = this.reversed, D = this.track.buffer.duration;
+    const out = this.ctx.createGain(); out.connect(this.fxIn);
+    for (let t = at, k = 0; t < at + dur - 1e-3; t += strokeDur, k++) {
+      const fwd = k % 2 === 0, src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+      src.buffer = fwd ? this.track.buffer : rev;
+      const peak = 2 * len / strokeDur;                              // triangle hand motion covers `len` seconds
+      src.playbackRate.setValueAtTime(0.05, t);
+      src.playbackRate.linearRampToValueAtTime(peak, t + strokeDur / 2);
+      src.playbackRate.linearRampToValueAtTime(0.05, t + strokeDur);
+      const gg = g.gain;
+      gg.setValueAtTime(0, t); gg.linearRampToValueAtTime(1, t + 0.004);
+      if (kind === 'chirp') { if (fwd) gg.linearRampToValueAtTime(0, t + strokeDur * 0.9); else { gg.setValueAtTime(0, t); gg.linearRampToValueAtTime(1, t + strokeDur * 0.5); } }
+      if (kind === 'transformer') { const q = spb / 8; for (let c = t + q; c < t + strokeDur; c += q) gg.setValueAtTime(((c - t) / q) % 2 < 1 ? 1 : 0, c); }
+      if (kind === 'flare') { gg.setValueAtTime(0, t + strokeDur * 0.45); gg.setValueAtTime(1, t + strokeDur * 0.55); }
+      gg.linearRampToValueAtTime(0, t + strokeDur);
+      src.connect(g); g.connect(out);
+      src.start(t, fwd ? p : Math.max(0, D - p - len)); src.stop(t + strokeDur + 0.01);
+    }
+    this._duck(at, dur);
+  }
+
+  // tape stop / turntable brake over `beats`; the track slips underneath and drops back in afterwards
+  brake(at, beats = 1) {
+    if (!this.track || !this.playing) return;
+    const dur = beats * 60 / this.track.bpm / this.rate;
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    src.buffer = this.track.buffer;
+    src.playbackRate.setValueAtTime(this.rate, at); src.playbackRate.exponentialRampToValueAtTime(0.04, at + dur);
+    g.gain.setValueAtTime(1, at); g.gain.setValueAtTime(1, at + dur * 0.8); g.gain.linearRampToValueAtTime(0, at + dur);
+    src.connect(g); g.connect(this.fxIn); src.start(at, this.position(at)); src.stop(at + dur + 0.02);
+    this._duck(at, dur);
+  }
+
+  // jump playback to track position `pos` exactly at ctx time `at` (use bar-aligned positions to stay in phase)
+  jumpTo(at, pos) {
+    if (!this.track) return;
+    this.play(at, Math.max(0, Math.min(this.duration - 1, pos)));
+  }
+  // ctx time of the next bar line
+  nextBarTime(at = this.ctx.currentTime + 0.05) { return this.timeOfBeat(Math.ceil(this.beatAt(at) / 4 - 1e-4) * 4); }
 
   // reverse spin-back of the last ~beats, then drop back in (slip) at the end
   backspin(at, beats = 2) {

@@ -2,6 +2,7 @@ import { Mixer } from './decks.js';
 import { Ears } from './ears.js';
 import { FlySynth } from './synth.js';
 import { FlyDJ } from './flydj.js';
+import { Performer } from './perform.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
 import { trackFromFile, renderDemo, demoCount } from './tracks.js';
 import { renderDesi, desiCount } from './desi.js';
@@ -135,11 +136,15 @@ async function start() {
   S.bands = bands;
   S.ears = new Ears(ctx, mixer, bands);
   S.synth = new FlySynth(ctx, mixer.master, S.hello.outputs);
-  S.dj = new FlyDJ(mixer, S.ears, S.synth, S.hello.outputs, log);
+  S.perf = new Performer(mixer, S.synth, log);
+  S.perf.onActivity = lightPad;
+  S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
+  S.dj.epic = +$('#epic').value;
   S.dj.onLoadNext = loadNext;
   mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5) loadNext(i); }; });
   buildMoves();
   bindDeckUI();
+  bindPerformance();
 
   $('#splash-msg').textContent = 'rendering demo tracks…';
   S.style = $('#crate-style').value;
@@ -218,10 +223,60 @@ function bindDeckUI() {
       inp.ondblclick = () => { inp.value = 0; d.setEQ(band, 0); d._manualEQ = false; };
       d.ui[band] = inp;
     }
+    root.querySelectorAll('.cue').forEach((b) => { b.onclick = () => S.perf.hotCue(d, +b.dataset.cue); });
     const f = $('.filter', root);
     f.oninput = () => { d._manualFilter = true; d.setFilter(+f.value); };
     f.ondblclick = () => { f.value = 0; d._manualFilter = false; };
     d.ui.filter = f;
+  });
+}
+
+// ---------------- performance pads & keyboard ----------------
+const PAD_OF = {};   // activity name -> pad elements to light
+function lightPad(name) {
+  for (const el of PAD_OF[name] || []) { el.classList.add('lit'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('lit'), 450); }
+}
+function runAct(act, shift = false) {
+  const P = S.perf, [kind, arg] = act.split(':');
+  if (!S.started) return;
+  const beats = S.fxBeats;
+  if (kind === 'fx') P.beatFx(arg, beats, 'you');
+  else if (kind === 'roll') P.roll(+arg, Math.max(1, beats), 'you');
+  else if (kind === 'scratch') P.scratch(arg, Math.max(1, beats), 'you');
+  else if (kind === 'build') P.buildDrop({ bars: shift ? 8 : +arg });
+  else if (kind === 'dropswap') P.dropSwap('you') || log('drop swap needs both decks playing');
+  else if (kind === 'echoout') { if (P.echoOut('you')) S.dj.afterCut(); }
+  else if (kind === 'spincut') { if (P.spinCut('you')) S.dj.afterCut(); }
+  else if (kind === 'brake') P.brake('you');
+  else if (kind === 'backspin') P.backspin('you');
+  else if (kind === 'jump') P.beatJump(+arg);
+  else if (kind === 'sample') P.sample(arg, 'you');
+}
+function bindPerformance() {
+  S.fxBeats = 1;
+  const keyMap = {};
+  document.querySelectorAll('.pad').forEach((b) => {
+    const act = b.dataset.act, name = act.startsWith('fx:') || act.startsWith('sample:') ? act.split(':')[1]
+      : act.startsWith('build') ? 'build' : act.split(':')[0];
+    (PAD_OF[name] ||= []).push(b);
+    b.onclick = (e) => runAct(act, e.shiftKey);
+    const k = b.querySelector('kbd')?.textContent;
+    if (k && k.length === 1) keyMap[k.toLowerCase()] = act;
+  });
+  PAD_OF.echo = [...(PAD_OF.echo || []), ...(PAD_OF.echoout || [])];
+  keyMap[' '] = 'build:4';
+  $('#beats').querySelectorAll('button').forEach((b) => b.onclick = () => {
+    $('#beats').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
+    b.classList.add('sel'); S.fxBeats = +b.dataset.b;
+  });
+  $('#epic').oninput = (e) => { S.dj.epic = +e.target.value; };
+  const cueKeys = { 1: [0, 0], 2: [0, 1], 3: [0, 2], 4: [0, 3], 7: [1, 0], 8: [1, 1], 9: [1, 2], 0: [1, 3] };
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k in cueKeys && S.started) { const [d, c] = cueKeys[k]; S.perf.hotCue(S.mixer.decks[d], c); return; }
+    const act = keyMap[k];
+    if (act) { e.preventDefault(); runAct(act, e.shiftKey); lightPad(act.startsWith('build') ? 'build' : act.split(':')[1] || act); }
   });
 }
 
@@ -254,6 +309,7 @@ function anim() {
     if (!d._manualFilter && document.activeElement !== d.ui.filter) d.ui.filter.value = d.filterVal;
     if (!d._manualEQ) d.ui.low.value = d.eqVals.low;
   });
+  for (const n of ['sweep', 'lpf', 'trans', 'crush', 'flanger', 'reverb']) if (mx.fx.isActive(n)) lightPad(n);
   if (document.activeElement !== $('#xfader')) $('#xfader').value = mx.x;
   const p = S.dj.pref, bar = $('#pref-bar div');
   setStyle(bar, 'left', `${(50 + Math.min(0, p) * 50).toFixed(0)}%`); setStyle(bar, 'width', `${(Math.abs(p) * 50).toFixed(0)}%`);

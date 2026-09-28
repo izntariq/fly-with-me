@@ -1,7 +1,7 @@
 // Desi crate: bhangra / tabla / dholak grooves, synthesized sample-by-sample.
 // Plucked strings (tumbi, sitar, tanpura) are Karplus-Strong with meend (glide) and a jawari-style buzz.
 
-import { SCALES, noteName, peaks, rng, mtof } from './tracks.js';
+import { SCALES, noteName, peaks, rng, mtof, DEMO_CUES } from './tracks.js';
 
 const SR = 44100;
 const TAU = 2 * Math.PI;
@@ -214,5 +214,5 @@ export async function renderDesi(i) {
   const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: SR });
   buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
   return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.raga, peaks: peaks(buffer),
-           source: 'demo', style: 'desi', key: `${noteName(D.root)} raag ${D.raga}` };
+           source: 'demo', style: 'desi', key: `${noteName(D.root)} raag ${D.raga}`, cues: DEMO_CUES };
 }
