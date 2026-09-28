@@ -35,6 +35,7 @@ export const MOVES = [
 ];
 
 import { camelotDistance, camelotName } from './analysis.js';
+import { STYLES } from './djstyles.js';
 
 // How the fly adapts its playing to the style of what's on air (detected for your own tracks).
 //   cool: cooldown multiplier   build: how keen on build-ups   remap: swap a move for a better-fitting one
@@ -79,6 +80,17 @@ export class FlyDJ {
     this.onAirSince = 0;
     this.lastAny = -1e9; this.lastBuild = -1e9; this.lastHorn = -1e9;
     this.onArrive = null;     // (deck, {snap, at}) => void — a new track is now the one on air
+    this.persona = STYLES.fly; // "play like" DJ style: flavours which moves, transitions and builds the fly uses
+    this.frameCounts = [];    // recent per-frame descending-neuron spike counts (for spike-driven chop patterns)
+  }
+
+  setPersona(key) { this.persona = STYLES[key] || STYLES.fly; }
+  // a 16-step chop pattern straight from the last 16 brain frames: busy frames play a slice, quiet ones rest
+  spikePattern() {
+    const c = this.frameCounts.slice(-16);
+    if (c.length < 16) return null;
+    const med = [...c].sort((a, b) => a - b)[8];
+    return c.map((n) => (n > med ? n % 4 : -1));
   }
 
   profile() { return PROFILE[this.mixer.onAir().track?.style] || PROFILE.club; }
@@ -106,6 +118,7 @@ export class FlyDJ {
       const w = this.steerSlots.has(s) ? 8 : 1;
       if (this.sideOf[s] < 0) L += w; else if (this.sideOf[s] > 0) R += w;
     }
+    this.frameCounts.push(L + R); if (this.frameCounts.length > 64) this.frameCounts.shift();
     const now = this.mixer.ctx.currentTime, beat = this.beat();
     const a = this.aud;
     if (a && now - a.t0 > 1.2) { a.acc += a.deck === 0 ? L : R; a.n += dt; }
@@ -115,7 +128,7 @@ export class FlyDJ {
       m.slow += (hz - m.slow) * Math.min(1, dt / 10);
       m.level = Math.min(1, m.fast / 60);
       if (!m.continuous && this.auto && this.t > 15 && m.slots.length && !this.perf.busy() && !this.pending) {
-        const prof = this.profile(), cs = this.coolScale * prof.cool;
+        const prof = this.profile(), cs = this.coolScale * prof.cool * (this.persona.cool || 1);
         if (m.fast > m.slow * this.ratioOf(m) + m.min && now - m.lastFire > m.cool * beat * cs
             && now - this.lastAny > 4 * beat * cs) {
           const sec = this.section();
@@ -138,15 +151,16 @@ export class FlyDJ {
     this.tempoOffset += (Math.max(-0.06, Math.min(0.06, want)) - this.tempoOffset) * dt / 12;
     if (this.auto && this.t > 30 && !this.pending && !this.commit && !this.perf.busy()
         && this.arFast > this.arSlow * (1.5 - 0.3 * this.epic) && this.arFast - this.arSlow > 0.15
-        && now - this.lastBuild > 64 * beat * this.coolScale / this.profile().build && this.onAirSince > 20
+        && now - this.lastBuild > 64 * beat * this.coolScale / (this.profile().build * (this.persona.build?.often ?? 1)) && this.onAirSince > 20
         && !this.section().afterDrop) {
       this.lastBuild = now; ar.fired = performance.now();
-      const bars = this.epic > 0.75 ? 8 : 4, on = this.mixer.onAir(), b = on.beatAt();
+      const pb = this.persona.build || {}, bars = (pb.bars || 4) * (this.epic > 0.75 ? 2 : 1), on = this.mixer.onAir(), b = on.beatAt();
+      const opts = { kind: pb.kind || 'roll', horn: pb.horn ?? true };
       // if the track has its own drop coming, time the build so it lands exactly there
       const drop = (on.track.cues || []).filter((c) => c.name.startsWith('drop')).map((c) => c.beat - b).filter((d) => d > bars * 4 + 2 && d < 96).sort((x, y) => x - y)[0];
       const who = `<b>arousal surge</b> across ${ar.slots.length} descending neurons`;
-      const Td = drop != null ? this.perf.buildDrop({ bars, startBeat: Math.round(b + drop) - bars * 4, who: who + ' (timed to the track\'s own drop)' })
-                              : this.perf.buildDrop({ bars, who });
+      const Td = drop != null ? this.perf.buildDrop({ ...opts, bars, startBeat: Math.round(b + drop) - bars * 4, who: who + ' (timed to the track\'s own drop)' })
+                              : this.perf.buildDrop({ ...opts, bars, who });
       if (Td) this.lastAny = Td;
     }
 
@@ -155,7 +169,10 @@ export class FlyDJ {
     if (sing.fast > 8 && !this.singing) {
       this.singing = true;
       this.log('<b>motor neurons</b> (proboscis / pharynx) firing → the fly sings');
-      if (this.auto && now - this.lastHorn > 16 * beat) { this.lastHorn = now; this.perf.sample('horn', '<b>motor neurons</b>'); }
+      const hype = this.persona.hype ?? ['horn'];
+      if (this.auto && hype.length && now - this.lastHorn > 16 * beat) {
+        this.lastHorn = now; this.perf.sample(hype[Math.floor(this.t) % hype.length], '<b>motor neurons</b>');
+      }
     } else if (sing.fast < 2) this.singing = false;
 
     // steering preference
@@ -171,6 +188,12 @@ export class FlyDJ {
   fire(key, label, intensity, count) {
     const P = this.perf, who = `<b>${label}</b>`;
     if (!this.mixer.onAir().playing) return;
+    // a DJ style maps each neuron group to its own moves, mild → wild; the burst's intensity picks one
+    const list = this.persona.moves?.[key];
+    if (list?.length) {
+      const lvl = Math.min(0.999, Math.max(0, (intensity - 1.2) / 2.5));
+      return this.doMove(list[Math.floor(lvl * list.length)], who);
+    }
     switch (key) {
       case 'escape':
         if (intensity > 3) P.brake(who); else P.roll(intensity > 2 ? 0.125 : 0.25, 1, who);
@@ -192,14 +215,44 @@ export class FlyDJ {
     }
   }
 
+  doMove(name, who) {
+    const P = this.perf, fx = ['echo', 'reverb', 'flanger', 'trans', 'crush', 'lpf', 'sweep'];
+    if (fx.includes(name)) return P.beatFx(name, name === 'flanger' || name === 'lpf' || name === 'sweep' ? 4 : name === 'reverb' ? 2 : 1, who);
+    if (name.startsWith('roll')) return P.roll(1 / +name.slice(4), 1, who);
+    if (['baby', 'chirp', 'flare', 'transformer', 'orbit', 'crab'].includes(name)) return P.scratch(name, 2, who);
+    if (['horn', 'siren', 'laser', 'boom', 'riser', 'dhol', 'co2'].includes(name)) return P.sample(name, who);
+    switch (name) {
+      case 'brake': return P.brake(who);
+      case 'backspin': return P.backspin(who);
+      case 'chop': return P.chop({ bars: 2, pattern: this.spikePattern(), who });
+      case 'stutter': return P.stutter(who);
+      case 'reverse': return P.reverse(who);
+      case 'tease': return P.bassTease(who);
+      case 'layer': return P.layer({ bars: 8, who });
+      case 'mashup': return P.mashup({ bars: 16, who });
+      case 'dub': return P.dub(who);
+      case 'resfilter': return P.resFilter(who);
+      case 'pump': return P.pump(who);
+      case 'singalong': return P.singalong({ bars: 4, who });
+      case 'fill': return P.fill(who);
+      case 'acid': return P.acid({ bars: 4, pattern: this.spikePattern()?.map((d, k) => (d < 0 ? -1 : (d * 2 + k) % 8)), who });
+    }
+  }
+
   // pick the transition style from whichever group is most excited right now
   chooseStyle() {
     const r = (k) => { const m = this.byKey[k]; return m.fast / (m.slow + 1); };
     const [on, off] = [this.mixer.onAir(), this.mixer.offAir()];
     const gap = on.track && off.track ? Math.abs(off.track.bpm / on.track.bpm - 1) : 0;
     const halfDouble = Math.abs(off.track?.bpm * 2 / on.track?.bpm - 1) < 0.06 || Math.abs(off.track?.bpm / 2 / on.track?.bpm - 1) < 0.06;
-    if (gap > 0.08 && !halfDouble) return r('reject') > r('echo') ? 'spin' : 'echo';   // tempos too far apart to blend
-    const cands = [['drop', r('escape') * (0.6 + 0.6 * this.epic)], ['echo', r('echo')], ['spin', r('reject') * 0.8], ['blend', 1.25]];
+    const w = { blend: 1, echo: 1, drop: 1, spin: 1, cut: 0, double: 0, ...(this.persona.transitions || {}) };
+    if (gap > 0.08 && !halfDouble) {                                                       // tempos too far apart to blend
+      if (w.cut > w.echo && w.cut > w.spin) return 'cut';
+      return r('reject') * w.spin > r('echo') * w.echo ? 'spin' : 'echo';
+    }
+    const cands = [['drop', r('escape') * (0.6 + 0.6 * this.epic) * w.drop], ['echo', r('echo') * w.echo], ['spin', r('reject') * 0.8 * w.spin],
+                   ['cut', r('trans') * w.cut], ['double', (1 + this.byKey.arousal.level) * w.double],
+                   ['kill', r('flange') * (w.kill || 0)], ['blend', 1.25 * w.blend]];
     cands.sort((a, b) => b[1] - a[1]);
     return cands[0][0];
   }
@@ -247,6 +300,9 @@ export class FlyDJ {
         if (style === 'echo' && (at = P.echoOut(who))) this.afterCut(at);
         else if (style === 'drop' && (at = P.dropSwap(who))) this.afterCut(at);
         else if (style === 'spin' && (at = P.spinCut(who))) this.afterCut(at);
+        else if (style === 'cut' && (at = P.hardCut(who))) this.afterCut(at);
+        else if (style === 'double' && (at = P.doubleDrop({ who }))) this.afterCut(at);
+        else if (style === 'kill' && (at = P.killDrop(who))) this.afterCut(at);
         else { this.commit = dir; mx.setCrossfader(x + dir * 0.13); this.log(`${who} starts a long EQ blend into deck ${dir > 0 ? 'B' : 'A'}`); }
       }
       return;
@@ -257,25 +313,28 @@ export class FlyDJ {
     if (this.aud) this.tickAudition(now);
     if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud) {
       const onIdx = onAir === A ? 0 : 1, dir = onAir === A ? 1 : -1;
-      const wants = this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3;
+      const [minOn, maxOn] = this.persona.onAir || [0, Infinity];
+      const wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn;
       if (wants || endingSoon) {
         const style = endingSoon && !wants ? 'blend' : this.chooseStyle();
         // start on the next 16-beat phrase line (a bar early for cuts, so the cut itself lands on the phrase)
         const phraseBeat = Math.ceil(onAir.beatAt(now + 0.2) / 16) * 16;
-        const lead = style === 'blend' ? 0 : style === 'drop' ? 8 : 4;
+        const lead = style === 'blend' ? 0 : style === 'drop' || style === 'double' || style === 'kill' ? 8 : 4;
         let at = onAir.timeOfBeat(phraseBeat - lead);
         if (at < now + 0.1) at = onAir.timeOfBeat(phraseBeat + 16 - lead);
         this.pending = { at, style, dir };
-        const why = { drop: 'giant fiber most excited', echo: 'echo neurons most excited', spin: 'aversion neurons most excited', blend: 'calm' }[style];
-        this.log(`fly turns ${dir > 0 ? 'right' : 'left'} (pref ${this.pref.toFixed(2)}) → will <b>${{ drop: 'drop-swap', echo: 'echo out', spin: 'spinback cut', blend: 'blend' }[style]}</b> into deck ${dir > 0 ? 'B' : 'A'} on the next phrase (${why})`);
+        const why = { drop: 'giant fiber most excited', echo: 'echo neurons most excited', spin: 'aversion neurons most excited', cut: 'rhythm neurons most excited', double: 'whole brain aroused', kill: 'flanger neurons most excited', blend: 'calm' }[style];
+        const names = { drop: 'drop-swap', echo: 'echo out', spin: 'spinback cut', cut: 'hard cut', double: 'double drop', kill: '1-bar kill', blend: 'blend' };
+        this.log(`fly turns ${dir > 0 ? 'right' : 'left'} (pref ${this.pref.toFixed(2)}) → will <b>${names[style]}</b> into deck ${dir > 0 ? 'B' : 'A'} on the next phrase (${why}${this.persona.key !== 'fly' ? ', ' + this.persona.name + ' style' : ''})`);
         return;
       }
     }
 
     // 3. a blend in progress: move the fader, finish unless the fly strongly changes its mind
     if (this.commit && bothPlaying) {
-      let v = this.commit / 16;
-      if (this.pref * this.commit < -0.35) v = -this.commit / 16;
+      const speed = 1 / ((this.persona.blendBars || 8) * 4 * beatLen);       // full fader travel over blendBars
+      let v = this.commit * speed;
+      if (this.pref * this.commit < -0.35) v = -this.commit * speed;
       const nx = Math.min(1, Math.max(0, x + v * dt));
       mx.setCrossfader(nx);
       this.bassSwap(nx, x);

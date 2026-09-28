@@ -3,6 +3,7 @@ import { Ears } from './ears.js';
 import { FlySynth } from './synth.js';
 import { FlyDJ } from './flydj.js';
 import { Performer } from './perform.js';
+import { STYLES } from './djstyles.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
 import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
 import { analyzeEnergy } from './analysis.js';
@@ -178,7 +179,7 @@ async function start() {
   S.dj.onLoadNext = loadNext;
   S.dj.onArrive = (deck, { snap, at }) => {
     if (!S.tempo || !$('#follow').checked || !deck.track) return;
-    const bpm = deck.track.bpm;
+    const bpm = styleTempo(deck.track.bpm);
     if (Math.abs(bpm / S.tempo.base - 1) < 0.005) return;
     if (snap) {
       // tempo jumps with the cut, on the beat the new track lands
@@ -315,7 +316,22 @@ function runAct(act, shift = false) {
   if (kind === 'fx') P.beatFx(arg, beats, 'you');
   else if (kind === 'roll') P.roll(+arg, Math.max(1, beats), 'you');
   else if (kind === 'scratch') P.scratch(arg, Math.max(1, beats), 'you');
-  else if (kind === 'build') P.buildDrop({ bars: shift ? 8 : +arg });
+  else if (kind === 'build') P.buildDrop({ bars: shift ? 8 : +arg, kind: buildKind() });
+  else if (kind === 'chop') P.chop({ bars: 2, who: 'you' });
+  else if (kind === 'doubledrop') { const end = P.doubleDrop({ who: 'you' }); if (end) S.dj.afterCut(end); else log('double drop needs both decks playing'); }
+  else if (kind === 'mashup') P.mashup({ who: 'you' }) || log('mashup needs both decks playing');
+  else if (kind === 'layer') P.layer({ who: 'you' }) || log('loop layer needs both decks playing');
+  else if (kind === 'stutter') P.stutter('you');
+  else if (kind === 'reverse') P.reverse('you');
+  else if (kind === 'tease') P.bassTease('you');
+  else if (kind === 'hardcut') { const at = P.hardCut('you'); if (at) S.dj.afterCut(at); }
+  else if (kind === 'killdrop') { const at = P.killDrop('you'); if (at) S.dj.afterCut(at); else log('1-bar kill needs both decks playing'); }
+  else if (kind === 'acid') P.acid({ bars: 4, pattern: S.dj.spikePattern(), who: 'you' });
+  else if (kind === 'singalong') P.singalong({ bars: 4, who: 'you' });
+  else if (kind === 'pump') P.pump('you');
+  else if (kind === 'dub') P.dub('you');
+  else if (kind === 'resfilter') P.resFilter('you');
+  else if (kind === 'fill') P.fill('you');
   else if (kind === 'dropswap') { const at = P.dropSwap('you'); if (at) S.dj.afterCut(at); else log('drop swap needs both decks playing'); }
   else if (kind === 'echoout') { const at = P.echoOut('you'); if (at) S.dj.afterCut(at); }
   else if (kind === 'spincut') { const at = P.spinCut('you'); if (at) S.dj.afterCut(at); }
@@ -324,6 +340,17 @@ function runAct(act, shift = false) {
   else if (kind === 'jump') P.beatJump(+arg);
   else if (kind === 'sample') P.sample(arg, 'you');
 }
+// the style's home tempo range, but only if reaching it needs less than an 8% pitch change
+function styleTempo(bpm) {
+  const r = S.dj?.persona?.bpm;
+  if (!r) return bpm;
+  const t = Math.min(r[1], Math.max(r[0], bpm));
+  return Math.abs(t / bpm - 1) <= 0.08 ? t : bpm;
+}
+
+// build style: the dropdown, or the current DJ style's favourite
+function buildKind() { const v = $('#build-kind').value; return v === 'auto' ? (S.dj?.persona?.build?.kind || 'roll') : v; }
+
 function bindPerformance() {
   S.fxBeats = 1;
   const keyMap = {};
@@ -342,6 +369,23 @@ function bindPerformance() {
     b.classList.add('sel'); S.fxBeats = +b.dataset.b;
   });
   $('#epic').oninput = (e) => { S.dj.epic = +e.target.value; };
+  // "play like" DJ styles
+  const sel = $('#persona');
+  for (const [k, st] of Object.entries(STYLES)) { const o = document.createElement('option'); o.value = k; o.textContent = st.name; sel.append(o); }
+  const applyPersona = () => {
+    S.dj.setPersona(sel.value);
+    const st = S.dj.persona;
+    $('#persona-tag').textContent = st.tagline;
+    // move the tempo into the style's home range (gently) if the music can get there without sounding pitched
+    if (st.bpm && S.tempo) {
+      const target = styleTempo(S.tempo.base);
+      if (target !== S.tempo.base) { S.tempo.glideTo = target; log(`${st.name} plays ${st.bpm[0]}–${st.bpm[1]} BPM → tempo drifting to ${target.toFixed(0)}`); }
+      else if (S.tempo.base < st.bpm[0] || S.tempo.base > st.bpm[1]) log(`${st.name} usually plays ${st.bpm[0]}–${st.bpm[1]} BPM; this music is too far away to pitch there, so the tempo stays`);
+    }
+    log(`the fly now plays like <b>${st.name}</b>`);
+  };
+  sel.onchange = applyPersona;
+  $('#persona-tag').textContent = STYLES.fly.tagline;
   // tempo
   const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; };
   $('#bpm').oninput = (e) => setBase(+e.target.value);

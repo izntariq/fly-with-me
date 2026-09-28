@@ -94,3 +94,23 @@ half the time.
 
 ## Docs — this changelog, git explainer, project notes
 The history was rebuilt from the session transcript (see [GIT.md](GIT.md)) and the documentation added.
+
+## v1.6 — play like the big names
+- Research into 29 DJs, with sources in [DJ_RESEARCH.md](DJ_RESEARCH.md): Guetta, Garrix, Tiësto, Calvin Harris,
+  Swedish House Mafia, DJ Snake, Skrillex, Diplo, Aoki, Armin, Alok, Nucleya, Fred again.., Carl Cox, Hawtin,
+  de Witte, Lens, Peggy Gou, Black Coffee, Solomun, Four Tet, Jamie xx, Prydz, Fisher, John Summit, Kaytranada,
+  Qbert, A-Trak, Jazzy Jeff.
+- **"Play like…" styles.** The neurons decide when; the style decides which moves, transitions, builds, blend
+  length, time on air, home tempo and hype.
+- **New moves:**
+  - Fred again.. live chops, with the pattern written by spikes
+  - Guetta's live 303, also written by spikes
+  - sing-along drop-out
+  - Fisher's 1-bar kill
+  - double drop, mashup, Hawtin loop layering, dub throw and Model 1 resonant filter
+  - Alok's sidechain pump and the Pryda snare fill
+  - Skrillex stutter, reverse, bass tease, hard cut
+  - Qbert's crab and orbit scratches
+  - CO2 blast, snare-roll / stutter / filter builds, downlifter
+  - mids-only reverb, as Swedish House Mafia do it
+- A build-style selector and pads for everything.

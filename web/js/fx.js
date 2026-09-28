@@ -48,7 +48,10 @@ export class FXRack {
     this.crushSum.connect(this.flDelay); this.flDelay.connect(this.flFb); this.flFb.connect(this.flDelay);
     this.flDelay.connect(this.flWet); this.flWet.connect(this.out);
     this.flLfo.connect(this.flDepth); this.flDepth.connect(this.flDelay.delayTime); this.flLfo.start();
-    this.verbSend.connect(this.verb); this.verb.connect(this.verbRet); this.verbRet.connect(this.out);
+    // reverb only on the mids (Swedish House Mafia): no boomy low end, no fizzy top in the tail
+    const vHp = ctx.createBiquadFilter(), vLp = ctx.createBiquadFilter();
+    vHp.type = 'highpass'; vHp.frequency.value = 250; vLp.type = 'lowpass'; vLp.frequency.value = 6000;
+    this.verbSend.connect(vHp); vHp.connect(vLp); vLp.connect(this.verb); this.verb.connect(this.verbRet); this.verbRet.connect(this.out);
     this.out.connect(dest);
     this.active = {};   // name -> ctx time it ends (for the UI)
   }
@@ -92,6 +95,32 @@ export class FXRack {
     const w = this.flWet.gain;
     w.setValueAtTime(0, at); w.linearRampToValueAtTime(0.85, at + 0.05); w.setValueAtTime(0.85, end - 0.1); w.linearRampToValueAtTime(0, end);
     this._mark('flanger', end);
+  }
+  // Model 1 style resonant low-pass sweep down and back up over `beats`
+  resSweep(at, beats) {
+    const f = this.lp.frequency, q = this.lp.Q, end = at + beats * this.spb;
+    f.cancelScheduledValues(at); q.cancelScheduledValues(at);
+    q.setValueAtTime(9, at); f.setValueAtTime(18000, at);
+    f.exponentialRampToValueAtTime(380, at + (end - at) * 0.55); f.exponentialRampToValueAtTime(22000, end);
+    q.setValueAtTime(1.1, end);
+    this._mark('lpf', end);
+  }
+  // sidechain pump (Alok): duck on every beat, swell back before the next kick
+  pump(at, beats) {
+    const gg = this.gate.gain, spb = this.spb;
+    gg.cancelScheduledValues(at);
+    for (let k = 0; k < beats; k++) { const t = at + k * spb; gg.setValueAtTime(0.2, t); gg.linearRampToValueAtTime(1, t + spb * 0.75); }
+    gg.setValueAtTime(1, at + beats * spb);
+    this._mark('trans', at + beats * spb);
+  }
+  // crowd sing-along (Fred again.. "Marea", Calvin Harris, SHM): the music falls to a muffled whisper for `beats`,
+  // then slams back on the downbeat
+  singalong(at, beats) {
+    const f = this.lp.frequency, gg = this.gate.gain, end = at + beats * this.spb;
+    f.cancelScheduledValues(at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(220, at + this.spb);
+    f.setValueAtTime(220, end - 0.01); f.setValueAtTime(22000, end);
+    gg.setValueAtTime(1, at); gg.linearRampToValueAtTime(0.3, at + this.spb); gg.setValueAtTime(0.3, end - 0.01); gg.setValueAtTime(1, end);
+    this._mark('lpf', end);
   }
   reverbThrow(at, beats) {
     const s = this.verbSend.gain, end = at + beats * this.spb;
@@ -170,6 +199,52 @@ export class Sampler {
     bp.type = 'bandpass'; bp.Q.value = 2; bp.frequency.setValueAtTime(300, at); bp.frequency.exponentialRampToValueAtTime(9000, at + dur);
     gg.gain.setValueAtTime(0.001, at); gg.gain.exponentialRampToValueAtTime(0.35, at + dur); gg.gain.linearRampToValueAtTime(0, at + dur + 0.03);
     s.connect(bp); bp.connect(gg); gg.connect(this.out); s.start(at); s.stop(at + dur + 0.05);
+  }
+  // big-room snare roll: 1/4 → 1/8 → 1/16 → 1/32 over `beats`, rising in pitch and level, ending at at+beats*spb
+  snareRoll(at, beats, spb) {
+    const ctx = this.ctx, end = at + beats * spb;
+    let t = at;
+    while (t < end - 1e-3) {
+      const p = (t - at) / (end - at), div = p < 0.25 ? 1 : p < 0.5 ? 2 : p < 0.85 ? 4 : 8, step = spb / div;
+      const s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain(), o = ctx.createOscillator(), og = ctx.createGain();
+      s.buffer = this.noise; bp.type = 'bandpass'; bp.frequency.value = 1800 + 2500 * p; bp.Q.value = 0.9;
+      const lvl = 0.12 + 0.45 * p * p;
+      g.gain.setValueAtTime(lvl, t); g.gain.exponentialRampToValueAtTime(0.001, t + Math.min(0.12, step * 0.9));
+      o.frequency.value = 190 * (1 + p * 0.8); og.gain.setValueAtTime(lvl * 0.6, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+      s.connect(bp); bp.connect(g); g.connect(this.out); o.connect(og); og.connect(this.out);
+      s.start(t, Math.random()); s.stop(t + 0.14); o.start(t); o.stop(t + 0.07);
+      t += step;
+    }
+  }
+  // CO2 cannon / confetti blast on a drop (Diplo, Aoki): a big bright hiss
+  co2(at) {
+    const ctx = this.ctx, s = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = this.noise; hp.type = 'highpass'; hp.frequency.setValueAtTime(1500, at); hp.frequency.exponentialRampToValueAtTime(5000, at + 1.2);
+    g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.45, at + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, at + 1.4);
+    s.connect(hp); hp.connect(g); g.connect(this.out); s.start(at, Math.random()); s.stop(at + 1.5);
+  }
+  // live acid line (Guetta's TB-303): saw through a screaming resonant low-pass, one note per 16th.
+  // notes: 16 midi notes (or null = rest), accent: 16 booleans
+  acid(at, bars, spb, notes, accent) {
+    const ctx = this.ctx, step = spb / 4, out = ctx.createGain(); out.gain.value = 0.22; out.connect(this.out); out.connect(this.echoIn);
+    for (let n = 0; n < bars * 16; n++) {
+      const m = notes[n % 16]; if (m == null) continue;
+      const t = at + n * step, acc = accent[n % 16], sweep = 0.4 + 0.6 * (n / (bars * 16));
+      const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+      f.type = 'lowpass'; f.Q.value = 14;
+      f.frequency.setValueAtTime(300 + (acc ? 3500 : 1600) * sweep, t); f.frequency.exponentialRampToValueAtTime(180, t + step * 0.9);
+      g.gain.setValueAtTime(acc ? 1 : 0.6, t); g.gain.setValueAtTime(acc ? 1 : 0.6, t + step * 0.8); g.gain.linearRampToValueAtTime(0, t + step * 0.98);
+      o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + step);
+    }
+  }
+  // white-noise downlifter after an impact
+  downlifter(at, dur) {
+    const ctx = this.ctx, s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = this.noise; s.loop = true; bp.type = 'bandpass'; bp.Q.value = 1.5;
+    bp.frequency.setValueAtTime(8000, at); bp.frequency.exponentialRampToValueAtTime(250, at + dur);
+    g.gain.setValueAtTime(0.28, at); g.gain.exponentialRampToValueAtTime(0.001, at + dur);
+    s.connect(bp); bp.connect(g); g.connect(this.out); g.connect(this.echoIn); s.start(at); s.stop(at + dur + 0.05);
   }
   // accelerating dhol roll (desi build-up), `beats` long, crescendo
   dholRoll(at, beats, spb) {

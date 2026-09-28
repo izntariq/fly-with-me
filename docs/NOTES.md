@@ -123,10 +123,10 @@ This matters for claims about the project.
 - the DJ craft: phrase alignment, bass swaps, build structure, harmonic mixing, tempo journeys
 - the musical mapping of neurons to notes (cell-type name hash → scale degree)
 
-**Not trained.** The fly brain is **not trained** on DJ sets or on anything else. Its synaptic weights are the FlyWire
-wiring and never change. The DJ techniques are hand-coded moves, based on quick research into how top DJs play (Carl
-Cox, Richie Hawtin, turntablists like Qbert and Jazzy Jeff, desi DJ staples). The fly's spikes decide *when* and
-*which*, not *how*. See §13 for how learning could be added.
+**Not trained.** The fly brain is **not trained** on DJ sets or on anything else (and, by choice, won't be). Its synaptic weights are the FlyWire
+wiring and never change. The DJ techniques are hand-coded moves and 29 "play like" styles, based on research into how big-name DJs play
+live ([DJ_RESEARCH.md](DJ_RESEARCH.md)). The fly's spikes decide *when* and *how intense*; the chosen style decides
+*what*. See §13 for how learning could be added.
 
 ## 6. Audio engine (`decks.js`, `fx.js`)
 
@@ -199,6 +199,19 @@ between any two moves.
 - Transitions start on the next **16-beat phrase line**. The style comes from the most excited group: giant fiber →
   drop swap, echo group → echo out, aversion → spinback cut, calm → a 16 s EQ blend with bass swap.
 - If the two tracks' tempos are more than 8% apart (and not half or double), it always cuts instead of blending.
+
+**DJ styles** (`djstyles.js`, research in [DJ_RESEARCH.md](DJ_RESEARCH.md)).
+- **Moves:** each style maps each neuron group to a list of moves, mild → wild. The burst's intensity
+  ((fast/slow − 1.2) / 2.5) picks one.
+- **Transitions:** weights for blend, echo out, drop swap, spinback cut, hard cut, double drop and Fisher's 1-bar kill.
+  They multiply how excited the matching neuron group is.
+- **Builds:** each style picks its build (cue roll, snare roll, stutter, filter), its length, whether there's a horn,
+  and how keen it is on building at all.
+- **Timing and tempo:** blend length; minimum and maximum seconds a track stays on; a cooldown multiplier; the
+  samples it hypes with; a home BPM range. The master tempo only drifts there if that needs less than an 8% pitch
+  change.
+- **Spike-written parts:** the Fred again.. chops and the Guetta 303 take their 16-step patterns straight from the
+  last 16 brain frames. Busy frames play, quiet frames rest.
 
 **Track picking.**
 1. The off-air deck needs a record.
@@ -298,7 +311,9 @@ All testing was automated, with headless Chrome through `playwright-core`:
 - Key-lock time-stretching (an AudioWorklet phase vocoder), so tempo changes don't shift pitch.
 - More senses: vision (photoreceptors reaching the central brain needs longer runs), and smell once there's a stable
   way to drive the antennal lobe.
-- Stems or vocal isolation for acapella mashups; a third deck; recording the set with the neuron log.
+- Stems or vocal isolation for true acapella mashups and drum-outs; a third and fourth deck (Carl Cox, SHM);
+  key-shifting acapellas; half-time/double-time switches; energy-arc scheduling for a whole set (Diplo, Guetta's
+  yo-yo); swing (Kaytranada); recording the set with the neuron log.
 
 ## 14. References
 

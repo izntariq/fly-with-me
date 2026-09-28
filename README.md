@@ -19,6 +19,7 @@ automatically.
 | Doc | What's in it |
 |---|---|
 | [`docs/NOTES.md`](docs/NOTES.md) | Comprehensive project notes: how every part works, the neuroscience, measured findings, design decisions, limitations, testing, ideas |
+| [`docs/DJ_RESEARCH.md`](docs/DJ_RESEARCH.md) | How 29 big-name DJs play live (Guetta, Fred again.., Garrix, Carl Cox, Hawtin, Fisher, Qbert…), what each finding became in the app, and all sources |
 | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every version from the first line of code, with what changed and why |
 | [`docs/GIT.md`](docs/GIT.md) | Git explainer: how this history is organised and how to browse, compare, run and restore any version |
 
@@ -71,11 +72,22 @@ too with the pads or the keyboard. Everything is quantized to the beat.
 | Group | Moves (key) |
 |---|---|
 | Beat FX | echo `Q`, reverb `W`, flanger `E`, trans gate `R`, bit-crush `T`, low-pass dip `Y`, high-pass sweep `U` (length: FX length buttons) |
-| Rolls & scratch | loop roll ¼ `A` / ⅛ `S` / 1/16 `D`, baby `F`, chirp `G`, transformer `H`, flare `J` |
+| Rolls & scratch | loop roll ¼ `A` / ⅛ `S` / 1/16 `D`, baby `F`, chirp `G`, transformer `H`, flare `J`, orbit, crab (Qbert) |
 | Moves | **build & drop** `space` (⇧ = 8 bars), drop swap `B`, echo out `O`, spinback cut `P`, tape stop `K`, spinback `L`, beat jump `,` `.` |
-| Sampler | air horn `Z`, dub siren `X`, laser `C`, boom `V`, riser `N`, dhol roll `M` |
+| Big-name moves | live chops `I` (Fred again..), double drop `[`, mashup `]`, loop layer `\` (Hawtin), stutter `;` (Skrillex), reverse `'`, bass tease `5`, hard cut `6`, 303 acid `` ` `` (Guetta), sing-along `/`, 1-bar kill (Fisher), pump (Alok), dub throw, resonant filter (Model 1), Pryda snare fill |
+| Sampler | air horn `Z`, dub siren `X`, laser `C`, boom `V`, riser `N`, dhol roll `M`, CO2 blast |
 | Hot cues | deck A `1`–`4`, deck B `7`–`0` (intro / build / drop / break; estimated from energy for your own tracks) |
 | Tempo | master BPM slider, `-` / `=` (⇧ for 0.1), TAP, ↺ back to the track's tempo; both decks follow and stay phase-locked. Pitch moves with tempo (no key-lock). |
+
+**Play like…** Pick one of 29 DJ styles from the research, among them David Guetta, Martin Garrix, Tiësto, Calvin
+Harris, Swedish House Mafia, DJ Snake, Skrillex, Diplo, Steve Aoki, Armin van Buuren, Alok, Nucleya, Fred again..,
+Carl Cox, Richie Hawtin, Charlotte de Witte, Amelie Lens, Peggy Gou, Black Coffee, Solomun, Four Tet, Jamie xx,
+Eric Prydz, Fisher, John Summit, Kaytranada, DJ Qbert, A-Trak and DJ Jazzy Jeff. The fly's neurons still decide *when*
+and *how hard*; the style decides *what*: which moves each neuron group reaches for, which transitions (Fisher's 1-bar
+kill, Skrillex's hard cuts, Black Coffee's 32-bar blends…), which build (snare roll, cue roll, stutter, filter), how
+long a track stays on (Kaytranada ~30 s, Tiësto 1.5–2 min), its home tempo and its crowd hype. **Build style** can
+override the build. The styles are interpretations of the research, not recordings of anyone's set; see
+[`docs/DJ_RESEARCH.md`](docs/DJ_RESEARCH.md).
 
 **Track selection.** When the off-air deck needs a new record, the fly previews up to 3 candidates in its cue ear
 (about 4 s each, from their drop, like a DJ in headphones). It scores each by how hard that side's descending neurons
@@ -126,6 +138,7 @@ web/js/decks.js       two decks: EQ, filter, rolls, scratching, brake, hot cues;
 web/js/fx.js          master FX rack (sweeps, trans, crush, flanger, reverb) + sampler (horn, siren, boom…)
 web/js/perform.js     DJ moves shared by fly and human: cue build & drop, drop swap, echo out, spin cut…
 web/js/flydj.js       neurons → DJ decisions: moves, transitions, track picking, adaptation
+web/js/djstyles.js    29 "play like" DJ styles from the research
 web/js/ears.js        audio spectrum → Johnston's organ drive, habituation
 web/js/synth.js       neurons → notes (club synth, or dhol + sitar) + MIDI out
 web/js/tracks.js      club demo tracks, BPM/beat detection, hot cues

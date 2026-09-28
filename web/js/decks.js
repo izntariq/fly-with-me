@@ -214,6 +214,7 @@ export class Deck {
 
   // turntablism: strokes back and forth over the beat under the needle, with crossfader patterns
   //   baby: plain back-and-forth   chirp: fader closes on each stroke end   transformer: fader chops 1/16s   flare: one click per stroke
+  //   orbit (2-click flare, DJ Disk / Qbert's crew): two clicks per stroke   crab (Qbert): four rapid finger taps per stroke
   scratch(at, kind = 'baby', beats = 2) {
     if (!this.track || !this.playing) return;
     const spb = 60 / this.track.bpm / this.rate, dur = beats * spb;
@@ -234,6 +235,8 @@ export class Deck {
       if (kind === 'chirp') { if (fwd) gg.linearRampToValueAtTime(0, t + strokeDur * 0.9); else { gg.setValueAtTime(0, t); gg.linearRampToValueAtTime(1, t + strokeDur * 0.5); } }
       if (kind === 'transformer') { const q = spb / 8; for (let c = t + q; c < t + strokeDur; c += q) gg.setValueAtTime(((c - t) / q) % 2 < 1 ? 1 : 0, c); }
       if (kind === 'flare') { gg.setValueAtTime(0, t + strokeDur * 0.45); gg.setValueAtTime(1, t + strokeDur * 0.55); }
+      if (kind === 'orbit') for (const c of [0.3, 0.62]) { gg.setValueAtTime(0, t + strokeDur * c); gg.setValueAtTime(1, t + strokeDur * (c + 0.08)); }
+      if (kind === 'crab') for (let c = 0; c < 4; c++) { const u = t + strokeDur * (0.15 + c * 0.18); gg.setValueAtTime(0, u); gg.setValueAtTime(1, u + strokeDur * 0.07); }
       gg.linearRampToValueAtTime(0, t + strokeDur);
       src.connect(g); g.connect(out);
       src.start(t, fwd ? p : Math.max(0, D - p - len)); src.stop(t + strokeDur + 0.01);
@@ -260,6 +263,31 @@ export class Deck {
   }
   // ctx time of the next bar line
   nextBarTime(at = this.ctx.currentTime + 0.05) { return this.timeOfBeat(Math.ceil(this.beatAt(at) / 4 - 1e-4) * 4); }
+
+  // play the next `beats` of the track backwards (Pioneer-style reverse), slipping back in afterwards
+  reverse(at, beats = 1) {
+    if (!this.track || !this.playing) return;
+    const spbT = 60 / this.track.bpm, dur = beats * spbT / this.rate, p = this.position(at), D = this.track.buffer.duration;
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    src.buffer = this.reversed; src.playbackRate.value = this.rate;
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(1, at + 0.01); g.gain.setValueAtTime(1, at + dur - 0.01); g.gain.linearRampToValueAtTime(0, at + dur);
+    src.connect(g); g.connect(this.fxIn);
+    src.start(at, Math.max(0, D - p - beats * spbT)); src.stop(at + dur + 0.02);
+    this._duck(at, dur);
+  }
+
+  // a one-shot slice of this track, played into `dest` (used for live chops and loop layering)
+  slice(at, pos, len, { rate = this.rate, gain = 1, dest = this.fxIn, loopFor = 0 } = {}) {
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    src.buffer = this.track.buffer; src.playbackRate.value = rate;
+    const dur = loopFor || len / rate;
+    if (loopFor) { src.loop = true; src.loopStart = pos; src.loopEnd = pos + len; }
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(gain, at + 0.004);
+    g.gain.setValueAtTime(gain, at + dur - 0.01); g.gain.linearRampToValueAtTime(0, at + dur);
+    src.connect(g); g.connect(dest);
+    src.start(at, pos); src.stop(at + dur + 0.02);
+    return g;
+  }
 
   // reverse spin-back of the last ~beats, then drop back in (slip) at the end
   backspin(at, beats = 2) {

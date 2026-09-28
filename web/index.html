@@ -107,13 +107,22 @@
     <div class="perf-head">
       <h3>Performance <span class="dim">(the fly fires these from its neurons; you can too — click or use the keys)</span></h3>
       <div class="perf-opts">
+        <label>Play like<select id="persona"></select></label>
         <label>Epicness<input type="range" id="epic" min="0" max="1" step="0.01" value="0.6"></label>
+        <label>Build style<select id="build-kind">
+          <option value="auto">DJ style decides</option>
+          <option value="roll">cue roll (Carl Cox)</option>
+          <option value="snare">snare roll (big room)</option>
+          <option value="stutter">stutter (bass)</option>
+          <option value="filter">filter (house / techno)</option>
+        </select></label>
         <div class="beats" id="beats" title="length of FX throws">
           <span>FX length</span>
           <button data-b="0.5">½</button><button data-b="1" class="sel">1</button><button data-b="2">2</button><button data-b="4">4</button><button data-b="8">8</button>
         </div>
       </div>
     </div>
+    <p id="persona-tag" class="dim persona-tag"></p>
     <div class="pads">
       <div class="pad-group"><h4>Beat FX</h4>
         <button class="pad" data-act="fx:echo">Echo<kbd>Q</kbd></button>
@@ -132,6 +141,8 @@
         <button class="pad" data-act="scratch:chirp">Chirp<kbd>G</kbd></button>
         <button class="pad" data-act="scratch:transformer">Transform<kbd>H</kbd></button>
         <button class="pad" data-act="scratch:flare">Flare<kbd>J</kbd></button>
+        <button class="pad" data-act="scratch:orbit" title="2-click flare">Orbit</button>
+        <button class="pad" data-act="scratch:crab" title="DJ Qbert's crab scratch">Crab</button>
       </div>
       <div class="pad-group"><h4>Moves</h4>
         <button class="pad big-pad" data-act="build:4">BUILD &amp; DROP<kbd>space</kbd></button>
@@ -144,6 +155,23 @@
         <button class="pad" data-act="jump:-4">Jump −4<kbd>,</kbd></button>
         <button class="pad" data-act="jump:4">Jump +4<kbd>.</kbd></button>
       </div>
+      <div class="pad-group"><h4>Big-name moves</h4>
+        <button class="pad" data-act="chop" title="Fred again.. style live chops of the playing track">Live chops<kbd>I</kbd></button>
+        <button class="pad" data-act="doubledrop" title="both decks drop together">Double drop<kbd>[</kbd></button>
+        <button class="pad" data-act="mashup" title="the other deck's vocals over this one">Mashup<kbd>]</kbd></button>
+        <button class="pad" data-act="layer" title="Hawtin / Cox loop layering">Loop layer<kbd>\</kbd></button>
+        <button class="pad" data-act="stutter">Stutter<kbd>;</kbd></button>
+        <button class="pad" data-act="reverse">Reverse<kbd>'</kbd></button>
+        <button class="pad" data-act="tease" title="bass out for a bar, then slam it back">Bass tease<kbd>5</kbd></button>
+        <button class="pad" data-act="hardcut">Hard cut<kbd>6</kbd></button>
+        <button class="pad" data-act="acid" title="David Guetta's live TB-303, in the track's key">303 acid<kbd>`</kbd></button>
+        <button class="pad" data-act="singalong" title="Fred again.. / Calvin Harris: music falls away for the crowd to sing">Sing-along<kbd>/</kbd></button>
+        <button class="pad" data-act="killdrop" title="Fisher: the mix drops out for a bar, then the other deck hits">1-bar kill</button>
+        <button class="pad" data-act="pump" title="Alok: sidechain pumping">Pump</button>
+        <button class="pad" data-act="dub" title="Hawtin's foot-pedal delay throw">Dub throw</button>
+        <button class="pad" data-act="resfilter" title="Model 1 resonant filter sweep">Res filter</button>
+        <button class="pad" data-act="fill" title="Eric Prydz's snare fill into the next bar">Snare fill</button>
+      </div>
       <div class="pad-group"><h4>Sampler</h4>
         <button class="pad" data-act="sample:horn">📯 Air horn<kbd>Z</kbd></button>
         <button class="pad" data-act="sample:siren">Siren<kbd>X</kbd></button>
@@ -151,6 +179,7 @@
         <button class="pad" data-act="sample:boom">Boom<kbd>V</kbd></button>
         <button class="pad" data-act="sample:riser">Riser<kbd>N</kbd></button>
         <button class="pad" data-act="sample:dhol">Dhol roll<kbd>M</kbd></button>
+        <button class="pad" data-act="sample:co2" title="CO2 cannon / confetti blast">CO2 blast</button>
       </div>
     </div>
   </section>
