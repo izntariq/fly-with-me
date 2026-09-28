@@ -3,13 +3,14 @@ import { Ears } from './ears.js';
 import { FlySynth } from './synth.js';
 import { FlyDJ } from './flydj.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
-import { trackFromFile, renderDemo, demoCount, noteName } from './tracks.js';
+import { trackFromFile, renderDemo, demoCount } from './tracks.js';
+import { renderDesi, desiCount } from './desi.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const S = {
   ws: null, hello: null, ctx: null, mixer: null, ears: null, synth: null, dj: null,
   brainView: null, raster: null, xy: null,
-  crate: [], crateNext: 0, feed: { sugar: 0, bitter: 0 }, wind: 0,
+  crate: [], crateNext: 0, style: 'desi', feed: { sugar: 0, bitter: 0 }, wind: 0,
   stats: { spikes: 0, frames: 0, load: 0, t: 0 }, nextGrid: 0, started: false, lastDrive: 0,
 };
 
@@ -67,16 +68,19 @@ function renderCrate() {
   const [A, B] = S.mixer?.decks || [];
   S.crate.forEach((t, i) => {
     const li = document.createElement('li');
+    if (!inStyle(t)) li.style.opacity = 0.35;
     if (A?.track === t) li.className = 'a'; else if (B?.track === t) li.className = 'b';
     li.innerHTML = `${t.name} <span class="meta">${t.bpm.toFixed(1)} bpm${t.key ? ' · ' + t.key : ''}${i === S.crateNext % S.crate.length ? ' · next' : ''}</span>`;
     ol.append(li);
   });
 }
 
+const inStyle = (t) => t.source === 'file' || S.style === 'all' || t.style === S.style;
+
 function pickNext(exclude) {
   for (let k = 0; k < S.crate.length; k++) {
     const t = S.crate[(S.crateNext + k) % S.crate.length];
-    if (!exclude.includes(t)) { S.crateNext += k + 1; return t; }
+    if (!exclude.includes(t) && inStyle(t)) { S.crateNext += k + 1; return t; }
   }
   return null;
 }
@@ -138,9 +142,12 @@ async function start() {
   bindDeckUI();
 
   $('#splash-msg').textContent = 'rendering demo tracks…';
-  S.crate.push(await renderDemo(0));
-  $('#splash-msg').textContent = 'rendering demo tracks… 1/' + demoCount;
-  S.crate.push(await renderDemo(1));
+  S.style = $('#crate-style').value;
+  const jobs = [...Array(desiCount).keys()].map((i) => () => renderDesi(i))
+    .concat([...Array(demoCount).keys()].map((i) => () => renderDemo(i)));
+  if (S.style === 'club') jobs.push(...jobs.splice(0, desiCount));
+  S.crate.push(await jobs.shift()());
+  S.crate.push(await jobs.shift()());
   $('#splash').classList.add('gone');
   S.started = true;
   loadNext(0);
@@ -150,7 +157,7 @@ async function start() {
   setInterval(control, 25);
   requestAnimationFrame(anim);
   initMidi();
-  for (let i = 2; i < demoCount; i++) { S.crate.push(await renderDemo(i)); renderCrate(); }
+  for (const job of jobs) { S.crate.push(await job()); renderCrate(); }
 }
 
 // ---------------- control loop (40 Hz) ----------------
@@ -172,6 +179,8 @@ function control() {
     const sel = $('#scale').value;
     if (sel === 'auto') S.synth.setKey(on.track.root ?? 45, on.track.scale === 'minor' ? 'minpent' : (on.track.scale || 'minpent'));
     else S.synth.setKey(on.track.root ?? 45, sel);
+    const style = on.track.style === 'desi' ? 'desi' : (on.track.style === 'club' ? 'club' : (S.style === 'desi' ? 'desi' : 'club'));
+    if (style !== S.synth.style) { S.synth.style = style; log(style === 'desi' ? 'fly voice → <b>dhol + sitar</b> (motor neurons drum, descending neurons play sitar)' : 'fly voice → club synth'); }
   }
 
   // 16th-note grid for the fly voice, clocked from the on-air deck
@@ -274,6 +283,7 @@ function bindGlobalUI() {
     if (S.ctx) addFiles(e.dataTransfer.files); else log('press "Start the fly" first, then drop tracks');
   });
   $('#btn-rec').onclick = toggleRecord;
+  $('#crate-style').onchange = (e) => { S.style = e.target.value; S.crateNext = 0; renderCrate(); log(`crate style → ${S.style}; the fly picks from it at the next track change`); };
   $('#midi-out').onchange = (e) => { S.synth.midi = S.midiOuts?.get(e.target.value) || null; };
 }
 

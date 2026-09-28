@@ -7,10 +7,16 @@ export const SCALES = {
   phrygian: [0, 1, 3, 5, 7, 8, 10],
   major: [0, 2, 4, 5, 7, 9, 11],
   minor: [0, 2, 3, 5, 7, 8, 10],
+  // ragas (as scales; Kafi = dorian, Bhairavi = phrygian, Khamaj = mixolydian)
+  kafi: [0, 2, 3, 5, 7, 9, 10],
+  bhairav: [0, 1, 4, 5, 7, 8, 11],
+  yaman: [0, 2, 4, 6, 7, 9, 11],
+  bhairavi: [0, 1, 3, 5, 7, 8, 10],
+  khamaj: [0, 2, 4, 5, 7, 9, 10],
 };
 export const noteName = (midi) => NOTE_NAMES[midi % 12];
 
-function peaks(buffer, n = 600) {
+export function peaks(buffer, n = 600) {
   const d = buffer.getChannelData(0), step = Math.floor(d.length / n), out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     let m = 0;
@@ -72,8 +78,8 @@ const DEMOS = [
 ];
 export const demoCount = DEMOS.length;
 
-function rng(seed) { let s = seed * 2654435761 >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
-const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+export function rng(seed) { let s = seed * 2654435761 >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 // Direct sample-level synthesis (fast: a 90 s track renders in well under a second).
 export async function renderDemo(i) {
@@ -170,5 +176,5 @@ export async function renderDemo(i) {
   const buffer = new AudioBuffer({ length: N, numberOfChannels: 2, sampleRate: sr });
   buffer.copyToChannel(L, 0); buffer.copyToChannel(Rt, 1);
   return { name: D.name, buffer, bpm: D.bpm, firstBeat: lead, root: D.root, scale: D.scale, peaks: peaks(buffer),
-           source: 'demo', key: `${noteName(D.root)} ${D.scale}` };
+           source: 'demo', style: 'club', key: `${noteName(D.root)} ${D.scale}` };
 }

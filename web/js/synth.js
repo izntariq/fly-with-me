@@ -4,6 +4,7 @@
 // cell type always plays the same note and you can learn to hear specific neurons.
 
 import { SCALES } from './tracks.js';
+import { ksPluck, dagga, tilli } from './desi.js';
 
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -28,6 +29,23 @@ export class FlySynth {
     this.midi = null;
     this.lastNote = new Float64Array(outputs.length);
     this.onNote = null;
+    this.style = 'club';            // 'desi': motor neurons play dhol, descending neurons play sitar
+    this.bufs = new Map();
+  }
+
+  _buf(key, make) {
+    if (!this.bufs.has(key)) {
+      const data = make(), b = this.ctx.createBuffer(1, data.length, 44100);
+      b.copyToChannel(data, 0);
+      this.bufs.set(key, b);
+    }
+    return this.bufs.get(key);
+  }
+
+  _playBuf(buf, t, gain, pan) {
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain(), p = this.ctx.createStereoPanner();
+    src.buffer = buf; g.gain.value = gain; p.pan.value = pan;
+    src.connect(g); g.connect(p); p.connect(this.out); src.start(t);
   }
 
   setLevel(v) { this.out.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05); }
@@ -76,7 +94,19 @@ export class FlySynth {
   play(slot, t, vel, spb16 = 0.12) {
     const m = this.pitchOf(slot), motor = this.voiceInfo[slot].motor;
     const ctx = this.ctx;
-    if (motor) {
+    if (this.style === 'desi') {
+      const v = this.voiceInfo[slot];
+      if (motor) {
+        // the fly drums: each motor neuron is a dhol stroke (bass dagga or treble tilli)
+        const low = v.h % 3 === 0;
+        this._playBuf(this._buf(low ? 'dagga' : 'tilli', low ? () => dagga(1) : () => tilli(1.1)), t, (low ? 0.9 : 0.6) * vel, low ? -0.15 : 0.2);
+      } else {
+        // sitar with meend: some neurons glide into their note
+        const glide = v.h % 4 === 0 ? -2 : v.h % 4 === 1 ? -1 : 0;
+        this._playBuf(this._buf(`sitar${m}${glide}`, () => ksPluck(440 * Math.pow(2, (m - 69) / 12), 1.4,
+          { decay: 0.998, bright: 0.25, buzz: 0.5, glide, glideTime: 0.09 })), t, 0.55 * vel, v.right ? 0.45 : -0.45);
+      }
+    } else if (motor) {
       const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
       o.type = 'square'; o.frequency.value = mtof(m);
       f.type = 'lowpass'; f.Q.value = 8; f.frequency.setValueAtTime(1800 * vel, t); f.frequency.exponentialRampToValueAtTime(120, t + spb16 * 1.8);
