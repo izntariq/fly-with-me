@@ -124,6 +124,13 @@
         </div>
       </div>
     </div>
+    <div class="setplan">
+      <label>Set plan<select id="arc"></select></label>
+      <label>Length<select id="set-len"><option value="10">10 min</option><option value="20">20 min</option><option value="30" selected>30 min</option><option value="60">60 min</option><option value="90">90 min</option></select></label>
+      <button id="set-start">▶ Start set</button>
+      <canvas id="arc-graph" width="360" height="60" title="the plan (line), where you are (marker), and how hard the fly is playing (dots)"></canvas>
+      <span id="set-status" class="dim"></span>
+    </div>
     <p id="persona-tag" class="dim persona-tag"></p>
     <div class="pads">
       <div class="pad-group"><h4>Beat FX</h4>

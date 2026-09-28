@@ -116,6 +116,9 @@ kbd { font: 9px/1 ui-monospace, monospace; color: var(--dim); border: 1px solid 
 .perf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .perf-opts { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .perf-opts label { min-width: 160px; }
+.setplan { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 8px 0 2px; }
+.setplan label { min-width: 150px; }
+#arc-graph { width: 360px; max-width: 100%; height: 60px; background: #0b0d12; border-radius: 6px; }
 .persona-tag { margin: 4px 0 6px; font-size: 12px; min-height: 1.4em; }
 .beats { display: flex; gap: 4px; align-items: center; font-size: 11px; color: var(--dim); }
 .beats span { margin-right: 4px; }

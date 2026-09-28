@@ -36,6 +36,7 @@ export const MOVES = [
 
 import { camelotDistance, camelotName } from './analysis.js';
 import { STYLES } from './djstyles.js';
+import { ARCS, energyAt, trackIntensity } from './setplan.js';
 
 // How the fly adapts its playing to the style of what's on air (detected for your own tracks).
 //   cool: cooldown multiplier   build: how keen on build-ups   remap: swap a move for a better-fitting one
@@ -85,6 +86,40 @@ export class FlyDJ {
   }
 
   setPersona(key) { this.persona = STYLES[key] || STYLES.fly; }
+
+  // ---------------- set planner ----------------
+  startSet(arcKey, minutes) {
+    const pts = ARCS[arcKey]?.points;
+    this.arc = pts ? { key: arcKey, points: pts, start: this.mixer.ctx.currentTime, length: minutes * 60, last: null } : null;
+  }
+  arcEnergy(now = this.mixer.ctx.currentTime) {
+    if (!this.arc) return null;
+    return energyAt(this.arc.points, (now - this.arc.start) / this.arc.length);
+  }
+  // follow the plan: epicness tracks the arc; the fly builds into its peaks and breaks the music down in its dips
+  tickArc(now) {
+    const E = this.arcEnergy(now);
+    if (E == null) return;
+    this.epic = 0.1 + 0.9 * E;
+    const a = this.arc, prev = a.last ?? E;
+    a.last = E;
+    if ((now - a.start) / a.length > 1) { this.log('📋 the set plan is complete — the fly plays on freely'); this.arc = null; return; }
+    // rising through 0.9 → build into the peak; falling through 0.45 → a breakdown.
+    // If the fly is busy when the arc crosses, the move waits until it's free (while the arc is still in that zone).
+    if (prev < 0.9 && E >= 0.9) a.want = 'peak';
+    if (prev > 0.45 && E <= 0.45) a.want = 'break';
+    if (a.want === 'peak' && E < 0.8) a.want = null;
+    if (a.want === 'break' && E > 0.55) a.want = null;
+    if (a.want && !this.perf.busy() && !this.pending) {
+      if (a.want === 'peak') {
+        const pb = this.persona.build || {};
+        if (this.perf.buildDrop({ kind: pb.kind || 'snare', bars: 8, horn: pb.horn ?? true, who: '📋 <b>set plan: peak</b>' })) this.lastBuild = now;
+      } else {
+        this.doMove(this.mixer.onAir().hasStems ? 'drumsout' : 'singalong', '📋 <b>set plan: breakdown</b>');
+      }
+      a.want = null;
+    }
+  }
   // a 16-step chop pattern straight from the last 16 brain frames: busy frames play a slice, quiet ones rest
   spikePattern() {
     const c = this.frameCounts.slice(-16);
@@ -148,7 +183,9 @@ export class FlyDJ {
     ar.level = Math.min(1, Math.max(0, (this.arFast / (this.arSlow + 1e-3) - 1) * 2));
     // tempo ride: an aroused fly pushes the tempo up, a calm one lets it sag (±6% at full epicness, slow)
     const want = (Math.min(1, (this.arFast / (this.arSlow + 1e-3) - 1) * 4) ) * 0.06 * (0.4 + 0.6 * this.epic);
-    this.tempoOffset += (Math.max(-0.06, Math.min(0.06, want)) - this.tempoOffset) * dt / 12;
+    const E = this.arcEnergy();
+    const plan = E == null ? 0 : (E - 0.5) * 0.05;                   // the set plan leans the tempo up to ±2.5%
+    this.tempoOffset += (Math.max(-0.06, Math.min(0.06, want + plan)) - this.tempoOffset) * dt / 12;
     if (this.auto && this.t > 30 && !this.pending && !this.commit && !this.perf.busy()
         && this.arFast > this.arSlow * (1.5 - 0.3 * this.epic) && this.arFast - this.arSlow > 0.15
         && now - this.lastBuild > 64 * beat * this.coolScale / (this.profile().build * (this.persona.build?.often ?? 1)) && this.onAirSince > 20
@@ -283,6 +320,7 @@ export class FlyDJ {
       if (!deck._manualFilter) deck.setFilter(deck._autoFilt);
     }
 
+    this.tickArc(now);
     const onAir = mx.onAir();
     this.onAirSince = mx.airness(onAir) > 0.99 ? this.onAirSince + dt : 0;
     if (this.userHold > 0) { this.userHold -= dt; return; }
@@ -390,11 +428,16 @@ export class FlyDJ {
     const val = a.cands.map((t, k) => {
       const harm = on && camelotDistance(t.camelot, on.camelot) <= 1 ? 1.15 : 1;
       const tempo = on && Math.abs(t.bpm / on.bpm - 1) < 0.06 ? 1.1 : 1;
-      return a.scores[k] / (1 + 0.35 * (t.plays || 0)) * harm * tempo;
+      // with a set plan, favour tracks whose intensity matches where the arc is heading (about a minute ahead)
+      const E = this.arcEnergy(this.mixer.ctx.currentTime + 60);
+      const fit = E == null ? 1 : 1.5 - Math.abs(trackIntensity(t) - E);
+      return a.scores[k] / (1 + 0.35 * (t.plays || 0)) * harm * tempo * fit;
     });
     const best = val.indexOf(Math.max(...val)), pick = a.cands[best];
     const summary = a.cands.map((t, k) => `${t.name} ${a.scores[k].toFixed(0)}`).join(' · ');
-    const why = on && camelotDistance(pick.camelot, on.camelot) <= 1 ? `, ${camelotName(pick.camelot)} mixes with ${camelotName(on.camelot)}` : '';
+    let why = on && camelotDistance(pick.camelot, on.camelot) <= 1 ? `, ${camelotName(pick.camelot)} mixes with ${camelotName(on.camelot)}` : '';
+    const Ep = this.arcEnergy(this.mixer.ctx.currentTime + 60);
+    if (Ep != null) why += `, intensity ${trackIntensity(pick).toFixed(2)} for plan energy ${Ep.toFixed(2)}`;
     this.picker.choose(a.deck, pick, ` — <b>the fly's pick</b> (🎧 ${summary} spikes/s${why})`);
   }
 

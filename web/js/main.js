@@ -4,6 +4,7 @@ import { FlySynth } from './synth.js';
 import { FlyDJ } from './flydj.js';
 import { Performer } from './perform.js';
 import { STYLES } from './djstyles.js';
+import { ARCS, energyAt } from './setplan.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
 import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
 import { analyzeEnergy } from './analysis.js';
@@ -413,6 +414,13 @@ function bindPerformance() {
     log(`the fly now plays like <b>${st.name}</b>`);
   };
   sel.onchange = applyPersona;
+  // set planner
+  for (const [k, a] of Object.entries(ARCS)) { const o = document.createElement('option'); o.value = k; o.textContent = a.name; $('#arc').append(o); }
+  $('#set-start').onclick = () => {
+    const k = $('#arc').value, min = +$('#set-len').value;
+    S.dj.startSet(k, min); S.arcHistory = [];
+    log(k === 'free' ? '📋 set plan off — the fly plays freely' : `📋 set plan: <b>${ARCS[k].name}</b>, ${min} minutes — epicness, track choice, tempo, builds and breakdowns follow the arc`);
+  };
   $('#persona-tag').textContent = STYLES.fly.tagline;
   // tempo
   const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; };
@@ -470,6 +478,7 @@ function anim() {
   });
   for (const n of ['sweep', 'lpf', 'trans', 'crush', 'flanger', 'reverb']) if (mx.fx.isActive(n)) lightPad(n);
   if (document.activeElement !== $('#xfader')) $('#xfader').value = mx.x;
+  drawArc(now);
   if (S.tempo) {
     setText($('#bpm-val'), S.tempo.cur.toFixed(1));
     if (document.activeElement !== $('#bpm')) $('#bpm').value = S.tempo.base;
@@ -487,6 +496,26 @@ function anim() {
     $('#st-time').textContent = (S.stats.t / 1000).toFixed(1);
     S.stats.spikes = 0; lastStat = now;
   }
+}
+
+// the set plan graph: plan line, "now" marker, and how hard the fly has actually been playing (epicness dots)
+let lastArcSample = 0;
+function drawArc(nowMs) {
+  const c = $('#arc-graph'), g = c.getContext('2d'), W = c.width, H = c.height, arc = S.dj?.arc;
+  if (!arc) { if (c._drawn !== 'free') { g.fillStyle = '#0b0d12'; g.fillRect(0, 0, W, H); g.fillStyle = '#7c8598'; g.font = '11px ui-monospace, monospace'; g.fillText('no plan — pick an arc and press Start set', 8, H / 2 + 4); c._drawn = 'free'; } setText($('#set-status'), ''); if ($('#epic') !== document.activeElement && S.dj) $('#epic').value = S.dj.epic; return; }
+  c._drawn = 'arc';
+  const t = S.ctx.currentTime, frac = (t - arc.start) / arc.length;
+  if (nowMs - lastArcSample > 1000) { lastArcSample = nowMs; (S.arcHistory ||= []).push([frac, S.dj.epic]); }
+  g.fillStyle = '#0b0d12'; g.fillRect(0, 0, W, H);
+  g.strokeStyle = '#8aa0ff'; g.lineWidth = 2; g.beginPath();
+  for (let x = 0; x <= W; x += 3) { const y = H - 4 - energyAt(arc.points, x / W) * (H - 8); x ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.stroke();
+  g.fillStyle = '#ffb347';
+  for (const [f, e] of S.arcHistory || []) g.fillRect(f * W - 1, H - 4 - ((e - 0.1) / 0.9) * (H - 8) - 1, 2, 2);
+  g.fillStyle = '#fff36b'; g.fillRect(Math.min(W - 2, frac * W), 0, 2, H);
+  const left = Math.max(0, arc.length * (1 - frac));
+  setText($('#set-status'), `energy ${energyAt(arc.points, frac).toFixed(2)} · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} left`);
+  if ($('#epic') !== document.activeElement) $('#epic').value = S.dj.epic;
 }
 
 function bindGlobalUI() {
