@@ -1,1 +1,144 @@
-<!doctype html><title>x</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fly Brain DJ</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>FLY BRAIN DJ</h1>
+    <span class="sub">a real <i>Drosophila</i> connectome, spiking in real time, on the decks</span>
+  </div>
+  <div class="status">
+    <span id="st-conn" class="pill off">offline</span>
+    <span class="stat"><b id="st-rate">0</b> spikes/s</span>
+    <span class="stat"><b id="st-load">–</b>× cpu</span>
+    <span class="stat"><b id="st-time">0.0</b>s brain time</span>
+  </div>
+</header>
+
+<div id="splash">
+  <div class="splash-card">
+    <h2>138,639 neurons · 15,091,983 connections</h2>
+    <p>This is the full adult fruit-fly brain wiring diagram (FlyWire v783) running as a leaky integrate-and-fire network
+      (Shiu et al., <i>Nature</i> 2024). Music is piped into the fly's real auditory neurons in
+      <b>Johnston's organ</b>. The fly's <b>descending &amp; motor neurons</b> play a synth and work the mixer.</p>
+    <p class="dim">Left ear hears deck A, right ear hears deck B (headphone cue). The fly steers the crossfader toward the ear it prefers.
+      Drop your own tracks anywhere on the page, or use the built-in demo tracks.</p>
+    <button id="btn-start" class="big">Start the fly</button>
+    <p id="splash-msg" class="dim"></p>
+  </div>
+</div>
+
+<main>
+  <section class="decks">
+    <div class="deck" id="deck-A">
+      <div class="deck-head"><span class="deck-letter">A</span><span class="track-name">—</span><span class="bpm">— BPM</span></div>
+      <canvas class="wave" width="600" height="70"></canvas>
+      <div class="deck-row">
+        <span class="time">0:00</span>
+        <div class="habit" title="fly habituation to this deck (ear gain drops while on air)"><div></div></div>
+        <button class="btn-play">▶</button>
+        <button class="btn-next" title="load next track from crate">⏭</button>
+      </div>
+      <div class="knobs">
+        <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
+        <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
+        <label>LOW<input type="range" class="eq-low" min="-24" max="6" step="0.5" value="0"></label>
+        <label>FILTER<input type="range" class="filter" min="-1" max="1" step="0.01" value="0"></label>
+      </div>
+    </div>
+
+    <div class="mixer">
+      <div class="ears">
+        <div class="ear"><span>L ear</span><canvas id="ear-L" width="120" height="60"></canvas></div>
+        <div class="ear"><span>R ear</span><canvas id="ear-R" width="120" height="60"></canvas></div>
+      </div>
+      <div class="xf-wrap">
+        <span>A</span><input type="range" id="xfader" min="0" max="1" step="0.001" value="0"><span>B</span>
+      </div>
+      <div class="pref"><span>fly preference</span><div id="pref-bar"><div></div></div></div>
+      <div class="mix-controls">
+        <label class="tog"><input type="checkbox" id="auto" checked> fly autopilot</label>
+        <label class="tog"><input type="checkbox" id="ears-room"> ears hear room mix</label>
+      </div>
+    </div>
+
+    <div class="deck" id="deck-B">
+      <div class="deck-head"><span class="deck-letter">B</span><span class="track-name">—</span><span class="bpm">— BPM</span></div>
+      <canvas class="wave" width="600" height="70"></canvas>
+      <div class="deck-row">
+        <span class="time">0:00</span>
+        <div class="habit" title="fly habituation to this deck (ear gain drops while on air)"><div></div></div>
+        <button class="btn-play">▶</button>
+        <button class="btn-next" title="load next track from crate">⏭</button>
+      </div>
+      <div class="knobs">
+        <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
+        <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
+        <label>LOW<input type="range" class="eq-low" min="-24" max="6" step="0.5" value="0"></label>
+        <label>FILTER<input type="range" class="filter" min="-1" max="1" step="0.01" value="0"></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="brain-row">
+    <div class="panel brain-panel">
+      <h3>Whole brain <span class="dim">(every dot is a neuron; flashes are spikes)</span></h3>
+      <canvas id="brain" width="900" height="420"></canvas>
+      <div class="legend"><i class="c-in"></i>sensory input <i class="c-out"></i>descending / motor output <i class="c-mid"></i>everything in between</div>
+    </div>
+    <div class="panel moves-panel">
+      <h3>Neurons on the mixer</h3>
+      <div id="moves"></div>
+      <h3>Output raster <span class="dim">(1,409 DN+MN, last 4 s)</span></h3>
+      <canvas id="raster" width="420" height="160"></canvas>
+    </div>
+  </section>
+
+  <section class="bottom-row">
+    <div class="panel">
+      <h3>Feed the fly</h3>
+      <div class="feed">
+        <button id="btn-sugar" title="stimulate sugar gustatory neurons (reward)">🍬 Sugar</button>
+        <button id="btn-bitter" title="stimulate bitter gustatory neurons (aversion)">🍋 Bitter</button>
+        <label>Wind<input type="range" id="wind" min="0" max="1" step="0.01" value="0"></label>
+        <button id="btn-reset" title="silence all neurons">Reset brain</button>
+      </div>
+      <h3>Fly voice</h3>
+      <div class="feed">
+        <label>Level<input type="range" id="voice-level" min="0" max="1" step="0.01" value="0.45"></label>
+        <label class="tog"><input type="checkbox" id="quantize" checked> quantize to beat</label>
+        <label>Scale<select id="scale">
+          <option value="auto">follow track</option>
+          <option value="minpent">minor pentatonic</option>
+          <option value="dorian">dorian</option>
+          <option value="phrygian">phrygian</option>
+          <option value="major">major</option>
+        </select></label>
+        <label>MIDI out<select id="midi-out"><option value="">off</option></select></label>
+      </div>
+      <div class="feed">
+        <button id="btn-rec">● Record set</button>
+        <span id="rec-status" class="dim"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Crate <span class="dim">(drop audio files anywhere)</span></h3>
+      <ol id="crate"></ol>
+      <input type="file" id="file-in" accept="audio/*" multiple>
+    </div>
+    <div class="panel">
+      <h3>What the fly is doing</h3>
+      <ul id="log"></ul>
+    </div>
+  </section>
+</main>
+
+<div id="drop-hint">Drop tracks to add them to the crate</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

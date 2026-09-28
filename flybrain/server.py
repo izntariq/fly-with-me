@@ -58,6 +58,8 @@ class FlyServer:
             "inputs": [{"name": c.name, "n": len(c.idx), "max_hz": c.max_hz, "desc": c.desc, **c.meta}
                        for c in self.inputs],
             "outputs": self.out_meta,
+            "in_idx": np.unique(np.concatenate([c.idx for c in self.inputs])).tolist(),
+            "out_idx": self.out_idx.tolist(),
         }
 
     def apply_drive(self):

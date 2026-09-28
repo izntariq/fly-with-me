@@ -85,8 +85,9 @@ def brain_xy(ann: pd.DataFrame, ids: np.ndarray) -> bytes:
         return XY_CACHE.read_bytes()
     pos = ann.reindex(ids)[["pos_x", "pos_y"]].to_numpy(np.float64)
     ok = ~np.isnan(pos).any(1)
-    lo, hi = np.nanmin(pos[ok], 0), np.nanmax(pos[ok], 0)
+    lo = np.nanmin(pos[ok], 0)
+    span = (np.nanmax(pos[ok], 0) - lo).max()      # one scale for both axes keeps the brain's shape
     q = np.zeros((len(ids), 2), np.uint16)
-    q[ok] = 1 + ((pos[ok] - lo) / (hi - lo) * 65534).astype(np.uint16)
+    q[ok] = 1 + ((pos[ok] - lo) / span * 65534).astype(np.uint16)
     XY_CACHE.write_bytes(q.tobytes())
     return q.tobytes()
