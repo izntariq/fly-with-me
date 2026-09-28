@@ -1,0 +1,4 @@
+data/
+vendor/
+__pycache__/
+.DS_Store

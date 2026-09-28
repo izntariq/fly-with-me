@@ -43,7 +43,7 @@ export class FlyDJ {
     this.commit = 0;          // direction of an in-progress transition (+1 toward B, -1 toward A)
     this.forceSpeed = 0;      // fast cut after rejection
     this.userHold = 0;        // seconds of manual crossfader override remaining
-    this.voiceLevel = 0.45;
+    this.voiceLevel = 0.6;
     this.onLoadNext = null;   // (deckIdx) => void
     this.offAirSince = [0, 0];
   }
@@ -72,8 +72,11 @@ export class FlyDJ {
         }
       }
     });
+    const sing = this.moves.find((m) => m.key === 'sing');
+    if (sing.fast > 8 && !this.singing) { this.singing = true; this.log(`<b>motor neurons</b> (proboscis / pharynx) firing → the fly sings`); }
+    else if (sing.fast < 2) this.singing = false;
     // steering preference
-    this.L += (L / dt - this.L) * Math.min(1, dt / 2);
+    this.L +=(L / dt - this.L) * Math.min(1, dt / 2);
     this.R += (R / dt - this.R) * Math.min(1, dt / 2);
     const raw = (this.R - this.L) / (this.R + this.L + 40);
     this.t += dt;
