@@ -73,6 +73,20 @@ too with the pads or the keyboard. Everything is quantized to the beat.
 fire, discounts tracks it has already played, and loads the winner from the intro. Scores show in the crate (🎧).
 Turn autopilot off and it goes back to crate order.
 
+**Adapting to new music.** Every track you drop in is analysed for tempo (with a double-time check for drum &
+bass), key (Krumhansl profiles → Camelot code), style (club / hip-hop / drum & bass / chill / desi — desi is
+recognised from the file name) and an energy curve per bar. The fly then:
+- plays its voice in the track's key (and switches to dhol + sitar for desi),
+- changes its move set with the style: hip-hop → scratches instead of builds, chill → reverb/echo instead of chops,
+  drum & bass → fast rolls,
+- reaches for space (echo, reverb, flanger) in breakdowns and lets a drop breathe for 8 bars,
+- times arousal builds so they land exactly on the track's own drop,
+- cuts (echo out / spinback) instead of blending when tempos are far apart, and snaps or drifts the master tempo to
+  each new track ("tempo follows each new track"),
+- favours next tracks that are harmonic neighbours (Camelot ±1) and within 6% tempo.
+
+Tempo detection is a heuristic: if a deck shows half or double the real BPM, hit **½×** / **2×** on the deck.
+
 **The fly as DJ.** Transitions start on 16-beat phrase lines, and the style is picked by whichever neuron group is most
 excited at that moment: giant fiber → drop swap, echo group → echo out, aversion neurons → spinback cut, calm → long
 EQ blend with bass swap. A surge across all ~1,300 descending neurons triggers a cue build & drop. With *fly rides the
