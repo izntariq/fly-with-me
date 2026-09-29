@@ -1,18 +1,31 @@
-# Fly Brain DJ
+# Fly With Me
 
-A real fruit-fly brain makes music and DJs.
+**A real fruit-fly brain that makes music and DJs.**
+
+![Fly With Me: two decks, the whole fly brain spiking, the neurons on the mixer](docs/screenshot.png)
 
 The complete adult *Drosophila* connectome (FlyWire v783: **138,639 neurons, 15,091,983 connections**) runs as a
 spiking network in real time. Music goes into the fly's real auditory neurons. Its real descending and motor neurons
-play a synth and work a two-deck DJ mixer.
+play a synth and work a two-deck DJ mixer: scratches, builds and drops, stems, 29 big-name DJ styles, set planning,
+key lock. It's the *Fly Brain DJ*.
+
+## Quick start
+
+You need Python 3.10+, a modern browser (Chrome, Edge, Firefox or Safari) and about 400 MB of disk for the data.
 
 ```bash
-./run.sh            # starts the brain server and opens http://localhost:8765
+git clone https://github.com/izntariq/fly-with-me.git
+cd fly-with-me
+python3 -m pip install -r requirements.txt
+./run.sh            # downloads the connectome on first run, starts the brain, opens http://localhost:8765
 ```
 
-Press **Start the fly**. A crate of 8 synthesized demo tracks (4 desi, 4 club techno) is ready right away. Drop
-your own audio files anywhere on the page to add them to the crate; tempo, key, style and structure are detected
+Press **Start the fly**. A crate of 8 synthesized demo tracks (4 desi, 4 club techno) is ready right away. Drop your
+own audio files anywhere on the page to add them to the crate; tempo, key, style, structure and stems are detected
 automatically.
+
+Check the brain simulator against the published model (Shiu et al. 2024) with `python3 -m flybrain.validate`.
+It should print about 400 active neurons and `PASS`.
 
 ## Documentation
 
@@ -174,12 +187,24 @@ web/js/tracks.js      club demo tracks, BPM/beat detection, hot cues
 web/js/desi.js        desi demo tracks: dhol, tabla, dholak, tumbi, sitar, tanpura, harmonium
 web/js/analysis.js    key / Camelot, style and energy analysis of new music
 web/js/viz.js         brain map, raster, ears, waveforms
-docs/                 notes, changelog, git explainer
+docs/                 notes, changelog, DJ research, git explainer
+flybrain/validate.py  check the simulator against the published model
 vendor/               Shiu et al. model + FlyWire v783 connectivity (cloned by run.sh)
 data/                 FlyWire annotations + caches (downloaded/generated)
 ```
 
-Requirements: Python 3.10+ with `numpy pandas pyarrow numba aiohttp` (see `requirements.txt`) and a Chromium-based
-browser or Firefox. First start takes ~10 s to build the connectome cache; after that it takes ~1 s.
+## License, data and credits
 
-Data: FlyWire connectome (Dorkenwald et al. 2024, Schlegel et al. 2024, *Nature*). Model: Shiu et al. 2024, *Nature*.
+- **Code:** [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
+- **Brain model:** a reimplementation of Shiu P.K. et al. (2024), *A Drosophila computational brain model reveals
+  sensorimotor processing*, Nature ([repo](https://github.com/philshiu/Drosophila_brain_model), MIT).
+- **Connectome data (not included; `run.sh` downloads it):** FlyWire v783 (Dorkenwald et al. 2024; Schlegel et al.
+  2024, *Nature*) is released under **[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)**. It needs
+  attribution and **may not be used commercially**. Anyone running Fly With Me with FlyWire data is bound by
+  those terms. See the [FlyWire citing guidelines](https://flywire.ai/guidelines).
+- **Citing:** see [CITATION.cff](CITATION.cff).
+- **DJ styles:** the "play like…" styles are our interpretations of publicly documented techniques
+  ([docs/DJ_RESEARCH.md](docs/DJ_RESEARCH.md)). Fly With Me isn't affiliated with, endorsed by or sponsored by any
+  of the artists named. All audio in the app is synthesized in code.
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).

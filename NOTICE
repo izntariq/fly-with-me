@@ -1,0 +1,18 @@
+Fly With Me
+Copyright 2026 Izn (github.com/izntariq) and the Fly With Me contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes a reimplementation of the Drosophila whole-brain leaky integrate-and-fire model by
+Philip K. Shiu, Nico Spiller et al. (https://github.com/philshiu/Drosophila_brain_model), which is
+Copyright (c) 2023 Philip Shiu and Nico Spiller and released under the MIT License.
+
+DATA — NOT INCLUDED, NOT COVERED BY THIS LICENSE
+run.sh downloads the FlyWire v783 connectome (via the Shiu et al. repository) and the FlyWire neuron
+annotations (https://github.com/flyconnectome/flywire_annotations). FlyWire data is released under
+CC BY-NC 4.0: attribution is required and it may NOT be used commercially. Anyone running this software
+with FlyWire data is bound by those terms. Please cite:
+  - Dorkenwald S. et al. (2024) Neuronal wiring diagram of an adult brain. Nature.
+  - Schlegel P. et al. (2024) Whole-brain annotation and multi-connectome cell typing of Drosophila. Nature.
+  - Shiu P.K. et al. (2024) A Drosophila computational brain model reveals sensorimotor processing. Nature.
+  (annotation release >= 3.0 also asks for Matsliah et al. 2024 and Berg et al. 2025)

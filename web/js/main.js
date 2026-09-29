@@ -579,7 +579,7 @@ function exportSet() {
   const hist = S.history || [];
   const count = (re) => hist.filter((h) => re.test(h.text)).length;
   const lines = [
-    `# Fly Brain DJ set — ${new Date().toLocaleString()}`, '',
+    `# Fly With Me set — ${new Date().toLocaleString()}`, '',
     `- Length: ${fmtT(S.ctx.currentTime)}`,
     `- Played like: ${S.dj.persona.name}`,
     `- Set plan: ${S.dj.arc ? ARCS[S.dj.arc.key].name : 'free'}`,
@@ -596,7 +596,7 @@ function exportSet() {
   ];
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/markdown' }));
-  a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
+  a.download = `fly-with-me-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
   a.click();
   log('📝 set exported: tracklist, move counts and full log');
 }
@@ -613,7 +613,7 @@ function toggleRecord() {
   rec.onstop = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
-    a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
+    a.download = `fly-with-me-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
     a.click();
     S.mixer.out.disconnect(dest); rec = null;
     exportSet();

@@ -1,6 +1,6 @@
 # Project notes
 
-Comprehensive notes on how Fly Brain DJ works, what's real biology and what's artistic design, what was measured, and
+Comprehensive notes on how Fly With Me (the Fly Brain DJ) works, what's real biology and what's artistic design, what was measured, and
 why things are the way they are. For the version-by-version story see [CHANGELOG.md](CHANGELOG.md); for git see
 [GIT.md](GIT.md).
 

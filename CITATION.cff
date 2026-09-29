@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use Fly With Me, please cite it, and the FlyWire and Shiu et al. papers it is built on."
+title: "Fly With Me: a real fruit-fly connectome that makes music and DJs"
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/izntariq/fly-with-me"
+authors:
+  - alias: izntariq
+    name: Izn
+references:
+  - type: article
+    title: "A Drosophila computational brain model reveals sensorimotor processing"
+    authors: [{ family-names: Shiu, given-names: Philip K. }, { name: "et al." }]
+    journal: Nature
+    year: 2024
+  - type: article
+    title: "Neuronal wiring diagram of an adult brain"
+    authors: [{ family-names: Dorkenwald, given-names: Sven }, { name: "et al." }]
+    journal: Nature
+    year: 2024
+  - type: article
+    title: "Whole-brain annotation and multi-connectome cell typing of Drosophila"
+    authors: [{ family-names: Schlegel, given-names: Philipp }, { name: "et al." }]
+    journal: Nature
+    year: 2024

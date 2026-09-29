@@ -172,13 +172,13 @@ def make_app(server: FlyServer) -> web.Application:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Fly brain DJ server")
+    ap = argparse.ArgumentParser(description="Fly With Me: fly brain server")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     server = FlyServer()
-    print(f"\n  Fly brain DJ -> http://{args.host}:{args.port}\n")
+    print(f"\n  Fly With Me -> http://{args.host}:{args.port}\n")
     web.run_app(make_app(server), host=args.host, port=args.port, print=None)
 
 

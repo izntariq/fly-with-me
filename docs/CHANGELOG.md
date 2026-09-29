@@ -153,3 +153,11 @@ slowed down, so the shifter shapes all the audio.
   | WSOLA | 50.6–53.5% | 440.1 Hz |
 - Latency compensation: decks schedule everything that happens before the shifter 24 ms early, so key-locked decks
   land on the beat grid with rolls, scratches, the synth and the sampler. Deck-vs-grid offset: 24.7 ms → 0.7 ms.
+
+## v1.12 — open-source release
+- The project is now **Fly With Me**, released under **Apache-2.0**, with a `NOTICE` covering the MIT brain model it
+  builds on and the CC BY-NC 4.0 FlyWire data.
+- Added `CITATION.cff` and `CONTRIBUTING.md`, plus `python -m flybrain.validate`, which reproduces the paper's
+  sugar experiment (394 active neurons; the paper reports ~400).
+- `run.sh` now works on Linux as well as macOS and checks dependencies. Requirements have version ranges.
+- A disclaimer that the DJ styles are interpretations and not affiliated with the artists.

@@ -3,3 +3,6 @@ vendor/
 __pycache__/
 .DS_Store
 .claude/settings.local.json
+
+# Claude Code local config
+.claude/
