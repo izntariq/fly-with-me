@@ -48,6 +48,9 @@ function connect() {
 async function onHello(h) {
   if (S.hello) return;
   S.hello = h;
+  const tb = h.trained;
+  $('#st-brain').textContent = tb ? `trained brain · ${tb.synapses.toLocaleString()} learned synapses` : 'naive brain';
+  $('#st-brain').className = 'pill ' + (tb ? 'trained' : 'naive');
   $('#splash-msg').textContent = `connected: ${h.n_neurons.toLocaleString()} neurons, ${h.inputs.length} sensory channels, ${h.outputs.length} output neurons`;
   const buf = await (await fetch('brain_xy.bin')).arrayBuffer();
   S.xy = new Uint16Array(buf);
@@ -202,6 +205,9 @@ async function start() {
   S.perf.onActivity = lightPad;
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
+  S.dj.trained = !!S.hello.trained;
+  if (S.hello.trained?.readout) S.dj.setReadout(S.hello.trained.readout, S.hello.outputs);
+  if (S.hello.trained) log(`this fly's brain is <b>trained</b>: ${S.hello.trained.synapses.toLocaleString()} synapses learned when a DJ builds, leaves space, mixes and peaks`);
   S.mc = S.dj.mc = new MC(log);
   S.mc.enabled = $('#mc').checked;
   // the MC hypes builds: "are you ready?" halfway, the shout lands on the drop
@@ -579,7 +585,7 @@ function exportSet() {
   const hist = S.history || [];
   const count = (re) => hist.filter((h) => re.test(h.text)).length;
   const lines = [
-    `# Fly With Me set — ${new Date().toLocaleString()}`, '',
+    `# Fly Brain DJ set — ${new Date().toLocaleString()}`, '',
     `- Length: ${fmtT(S.ctx.currentTime)}`,
     `- Played like: ${S.dj.persona.name}`,
     `- Set plan: ${S.dj.arc ? ARCS[S.dj.arc.key].name : 'free'}`,
@@ -596,7 +602,7 @@ function exportSet() {
   ];
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/markdown' }));
-  a.download = `fly-with-me-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
+  a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
   a.click();
   log('📝 set exported: tracklist, move counts and full log');
 }
@@ -613,7 +619,7 @@ function toggleRecord() {
   rec.onstop = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
-    a.download = `fly-with-me-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
+    a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
     a.click();
     S.mixer.out.disconnect(dest); rec = null;
     exportSet();

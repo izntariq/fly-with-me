@@ -1,0 +1,112 @@
+{
+ "method": "fit",
+ "init": "brains/trained_brain_v1.npz",
+ "freeze": "BUILD",
+ "held_out_tracks": [
+  "johnston-s-organ-v1",
+  "johnston-s-organ-v2",
+  "johnston-s-organ",
+  "proboscis-dhamaal-v1",
+  "proboscis-dhamaal-v2",
+  "proboscis-dhamaal"
+ ],
+ "train_tracks": [
+  "bhairav-in-the-mushroom-body-v1",
+  "bhairav-in-the-mushroom-body-v2",
+  "bhairav-in-the-mushroom-body",
+  "dhol-descending-neuron-v1",
+  "dhol-descending-neuron-v2",
+  "dhol-descending-neuron",
+  "giant-fiber-escape-v1",
+  "giant-fiber-escape-v2",
+  "giant-fiber-escape",
+  "moonwalker-dn-v1",
+  "moonwalker-dn-v2",
+  "moonwalker-dn",
+  "proboscis-extension-v1",
+  "proboscis-extension-v2",
+  "proboscis-extension",
+  "tabla-theka-connectome-v1",
+  "tabla-theka-connectome-v2",
+  "tabla-theka-connectome"
+ ],
+ "eta": 0.05,
+ "lam": 0.05,
+ "epochs": 8,
+ "rounds": 2,
+ "intents": {
+  "BUILD": [
+   "DNp01"
+  ],
+  "SPACE": [
+   "DNp02",
+   "DNp06",
+   "DNp11",
+   "DNp55"
+  ],
+  "MIX": [
+   "DNb06",
+   "DNge113",
+   "DNge145"
+  ],
+  "PEAK": [
+   "DNg24",
+   "DNg29"
+  ]
+ },
+ "held_out": [
+  "johnston-s-organ",
+  "proboscis-dhamaal"
+ ],
+ "trainable_synapses": 9978,
+ "trainable_neurons": 25,
+ "split": true,
+ "before": {
+  "split": {
+   "BUILD": 0.08663158026250223,
+   "SPACE": 0.10062342961550698,
+   "MIX": 0.13291411264021966,
+   "PEAK": 0.3925883306635372
+  }
+ },
+ "epochs_log": [
+  {
+   "round": 1,
+   "mean_rel_weight_change": 0.3930439878527777,
+   "summary": {
+    "split": {
+     "BUILD": 0.15112038305886272,
+     "SPACE": 0.0017916134834790782,
+     "MIX": 0.05914677165670807,
+     "PEAK": 0.4895479929169467
+    }
+   },
+   "model_loss_before": 3271.116549477249,
+   "model_loss_after": 242.5718941175252,
+   "seconds": 891.6140322685242
+  },
+  {
+   "round": 2,
+   "mean_rel_weight_change": 0.38939751656540117,
+   "summary": {
+    "split": {
+     "BUILD": 0.07730426260800106,
+     "SPACE": 0.0606296757053053,
+     "MIX": 0.13405106457703284,
+     "PEAK": 0.4407617200582062
+    }
+   },
+   "model_loss_before": 1759.069096536479,
+   "model_loss_after": 208.35414930427126,
+   "seconds": 933.9196920394897
+  }
+ ],
+ "after": {
+  "split": {
+   "BUILD": 0.07730426260800106,
+   "SPACE": 0.0606296757053053,
+   "MIX": 0.13405106457703284,
+   "PEAK": 0.4407617200582062
+  }
+ }
+}

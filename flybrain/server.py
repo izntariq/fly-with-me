@@ -30,9 +30,18 @@ log = logging.getLogger("flybrain")
 
 
 class FlyServer:
-    def __init__(self):
+    def __init__(self, brain_mode: str = "auto"):
         t = time.time()
         self.brain = Brain()
+        # a trained brain (python -m flybrain.train) is used when present, unless --brain naive
+        self.trained = None
+        trained_file = Path(__file__).resolve().parent.parent / "brains" / "trained_brain.npz"
+        if brain_mode == "trained" or (brain_mode == "auto" and trained_file.exists()):
+            self.trained = self.brain.load_trained(trained_file)
+            ro = trained_file.parent / "readout.json"      # which trained neurons signal which section (flybrain/readout)
+            if ro.exists():
+                self.trained["readout"] = json.loads(ro.read_text())
+            log.info("trained brain: %d learned synapses (epoch %d)", self.trained["synapses"], self.trained["epoch"])
         ann = load_annotations()
         self.inputs = build_inputs(ann, self.brain.id2idx)
         self.out_idx, self.out_meta = build_outputs(ann, self.brain.ids)
@@ -52,6 +61,7 @@ class FlyServer:
     def hello(self) -> dict:
         return {
             "type": "hello",
+            "trained": self.trained,
             "n_neurons": self.brain.n,
             "n_connections": int(len(self.brain.indices)),
             "frame_ms": FRAME_MS,
@@ -172,13 +182,15 @@ def make_app(server: FlyServer) -> web.Application:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Fly With Me: fly brain server")
+    ap = argparse.ArgumentParser(description="Fly brain DJ server")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--brain", choices=["auto", "trained", "naive"], default="auto",
+                    help="auto: use brains/trained_brain.npz if it exists; naive: the untouched connectome")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    server = FlyServer()
-    print(f"\n  Fly With Me -> http://{args.host}:{args.port}\n")
+    server = FlyServer(args.brain)
+    print(f"\n  Fly brain DJ -> http://{args.host}:{args.port}\n")
     web.run_app(make_app(server), host=args.host, port=args.port, print=None)
 
 

@@ -148,8 +148,9 @@ export function rng(seed) { let s = seed * 2654435761 >>> 0; return () => ((s = 
 export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 // Direct sample-level synthesis (fast: a 90 s track renders in well under a second).
-export async function renderDemo(i) {
-  const D = DEMOS[i], sr = 44100, bars = 48, spb = 60 / D.bpm, lead = 0.5;
+// `over` lets training render variations: another seed, tempo or key ({ seed, bpm, root, name })
+export async function renderDemo(i, over = {}) {
+  const D = { ...DEMOS[i], ...over }, sr = 44100, bars = 48, spb = 60 / D.bpm, lead = 0.5;
   const N = Math.ceil((lead + bars * 4 * spb + 2) * sr);
   const L = new Float32Array(N), Rt = new Float32Array(N), DL = new Float32Array(N), DR = new Float32Array(N);
   const R = rng(D.seed), sc = SCALES[D.scale];

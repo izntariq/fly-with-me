@@ -22,6 +22,8 @@ h1 { margin: 0; font-size: 18px; letter-spacing: .25em; }
 .status { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .stat b { color: var(--hot); font-weight: 600; }
 .pill { padding: 2px 8px; border-radius: 99px; font-size: 11px; background: #3a1f24; color: #ff8a8a; }
+.pill.trained { background: #2a1f3a; color: #d7a6ff; }
+.pill.naive { background: #1f2430; color: #9aa4b8; }
 .pill.on { background: #173a2c; color: #6bffb8; }
 h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #aab3c5; }
 .dim { color: var(--dim); text-transform: none; letter-spacing: 0; }

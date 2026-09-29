@@ -1,11 +1,25 @@
 Fly With Me
 Copyright 2026 Izn (github.com/izntariq) and the Fly With Me contributors
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+This product's code is licensed under the Apache License, Version 2.0 (see LICENSE). The files in brains/ are
+not: see "INCLUDED DATA" below.
 
 It includes a reimplementation of the Drosophila whole-brain leaky integrate-and-fire model by
 Philip K. Shiu, Nico Spiller et al. (https://github.com/philshiu/Drosophila_brain_model), which is
 Copyright (c) 2023 Philip Shiu and Nico Spiller and released under the MIT License.
+
+INCLUDED DATA — brains/ IS CC BY-NC 4.0, NOT APACHE-2.0
+The files in brains/ are derived from FlyWire data and are distributed under the Creative Commons
+Attribution-NonCommercial 4.0 International licence (https://creativecommons.org/licenses/by-nc/4.0/),
+with attribution to FlyWire (Princeton University and the FlyWire Consortium, https://flywire.ai). They may NOT
+be used commercially. Changes were made: the weights were retrained by this project.
+  - trained_brain.npz holds K (indices of FlyWire v783 synapses), w0 (their original FlyWire weights) and the
+    trained weights for those synapses
+  - readout.json and recruited_neurons.json list FlyWire root IDs
+  - sections_trained.json was fitted on the outputs of a listener fly (the FlyWire connectome) with section labels
+    from the All-In-One analyzer (see below); it holds model coefficients only, no audio and no track names
+  - training_log*.json are the training runs' numbers
+Cite the FlyWire papers below when you use them. brains/README.md says the same.
 
 DATA — NOT INCLUDED, NOT COVERED BY THIS LICENSE
 run.sh downloads the FlyWire v783 connectome (via the Shiu et al. repository) and the FlyWire neuron
@@ -16,3 +30,24 @@ with FlyWire data is bound by those terms. Please cite:
   - Schlegel P. et al. (2024) Whole-brain annotation and multi-connectome cell typing of Drosophila. Nature.
   - Shiu P.K. et al. (2024) A Drosophila computational brain model reveals sensorimotor processing. Nature.
   (annotation release >= 3.0 also asks for Matsliah et al. 2024 and Berg et al. 2025)
+
+Optional: `--connectome malecns` (flybrain/malecns.py) downloads the male CNS connectome, male-cns v1.0, by
+FlyEM / Janelia Research Campus and collaborators (https://male-cns.janelia.org; data from
+https://storage.googleapis.com/flyem-male-cns/v1.0/). It is released under CC BY 4.0: attribution is required.
+Anyone using it is bound by those terms. Please cite: male-cns v1.0, Janelia FlyEM (cite per the dataset's page,
+https://male-cns.janelia.org).
+
+OPTIONAL SONG-ANALYSIS TOOLCHAIN — NOT INCLUDED, NOT COVERED BY THIS LICENSE
+Analysed mixing uses a separate, optional environment (.venv-allin1) that the user installs themselves; none of it
+is redistributed here, and the app runs without it. It contains:
+  - all-in-one-infer (MIT License), a packaging of the All-In-One music structure analyzer
+    (https://github.com/mir-aidj/all-in-one, MIT License, (c) 2023 Taejun Kim) and Demucs (MIT License, (c) Meta
+    Platforms, Inc. and affiliates). Its pretrained models are downloaded at run time under their own terms.
+    Please cite: Kim T. & Nam J. (2023) All-In-One Metrical and Functional Structure Analysis with Neighborhood
+    Attentions on Demixed Audio. IEEE WASPAA 2023.
+  - demucs-mlx (MIT License), an MLX port of Demucs, run with the official HTDemucs weights.
+  - madmom, whose source code is BSD-licensed but whose trained model files are CC BY-NC-SA 4.0
+    (non-commercial, share-alike).
+Anyone installing that environment is bound by those packages' own terms. Its outputs (beats, downbeats and
+section labels) were used to fit brains/sections_trained.json, which is distributed non-commercially under
+CC BY-NC 4.0 with the rest of brains/.

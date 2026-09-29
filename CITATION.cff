@@ -1,7 +1,8 @@
 cff-version: 1.2.0
-message: "If you use Fly With Me, please cite it, and the FlyWire and Shiu et al. papers it is built on."
+message: "If you use Fly With Me, please cite it, and the FlyWire and Shiu et al. papers it is built on. The code is Apache-2.0; the trained brain files in brains/ are FlyWire-derived and CC BY-NC 4.0 (see NOTICE)."
 title: "Fly With Me: a real fruit-fly connectome that makes music and DJs"
 type: software
+version: 2.0.0
 license: Apache-2.0
 repository-code: "https://github.com/izntariq/fly-with-me"
 authors:
@@ -23,3 +24,16 @@ references:
     authors: [{ family-names: Schlegel, given-names: Philipp }, { name: "et al." }]
     journal: Nature
     year: 2024
+  - type: data
+    title: "male-cns v1.0: the male Drosophila central nervous system connectome"
+    authors: [{ name: "FlyEM, Janelia Research Campus" }]
+    url: "https://male-cns.janelia.org"
+    license: CC-BY-4.0
+    notes: "Optional (--connectome malecns). Cite per the dataset's page."
+  - type: conference-paper
+    title: "All-In-One Metrical And Functional Structure Analysis With Neighborhood Attentions on Demixed Audio"
+    authors: [{ family-names: Kim, given-names: Taejun }, { family-names: Nam, given-names: Juhan }]
+    collection-title: "2023 IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (WASPAA)"
+    conference: { name: "IEEE WASPAA 2023" }
+    year: 2023
+    notes: "Optional song analysis (.venv-allin1); its labels were used to fit brains/sections_trained.json."

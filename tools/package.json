@@ -1,0 +1,6 @@
+{
+  "name": "fly-brain-dj-tools",
+  "private": true,
+  "type": "module",
+  "devDependencies": { "playwright-core": "*" }
+}

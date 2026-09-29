@@ -114,8 +114,8 @@ const DESI = [
 ];
 export const desiCount = DESI.length;
 
-export async function renderDesi(i) {
-  const D = DESI[i], bars = 48, spb = 60 / D.bpm, lead = 0.5;
+export async function renderDesi(i, over = {}) {
+  const D = { ...DESI[i], ...over }, bars = 48, spb = 60 / D.bpm, lead = 0.5;
   const N = Math.ceil((lead + bars * 4 * spb + 3) * SR);
   const L = new Float32Array(N), Rt = new Float32Array(N), DL = new Float32Array(N), DR = new Float32Array(N);
   const R = rng(D.seed), sc = SCALES[D.raga];

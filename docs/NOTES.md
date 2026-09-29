@@ -1,6 +1,6 @@
 # Project notes
 
-Comprehensive notes on how Fly With Me (the Fly Brain DJ) works, what's real biology and what's artistic design, what was measured, and
+Comprehensive notes on how Fly Brain DJ works, what's real biology and what's artistic design, what was measured, and
 why things are the way they are. For the version-by-version story see [CHANGELOG.md](CHANGELOG.md); for git see
 [GIT.md](GIT.md).
 
@@ -8,7 +8,7 @@ why things are the way they are. For the version-by-version story see [CHANGELOG
 
 ## 1. Goal
 
-Use an actual fly brain to make music, then to DJ with it. Here *actual fly brain* means the complete wiring
+"Use an actual fly brain to synth music", then "make it able to DJ". Here *actual fly brain* means the complete wiring
 diagram of an adult fruit fly (*Drosophila melanogaster*) brain, reconstructed synapse by synapse from electron
 microscopy by the FlyWire consortium, and simulated as a spiking network. It does not mean a living fly.
 
@@ -289,7 +289,7 @@ The instruments:
 - **Tabla:** dayan has harmonic partials (f, 2f, 3f, 4f); bayan "ghe" bends up in pitch.
 - **Strings:** tumbi, sitar and tanpura use Karplus-Strong with a rectified "jawari" buzz.
 - **Harmonium:** reed partials with bellows tremolo.
-- The chimta was removed: its metallic ching on every offbeat was too tinny.
+- The chimta was removed on request, as the "repeating tinny sound".
 
 **Analysis of new tracks** (`tracks.js`, `analysis.js`):
 - **BPM:** onset comb filter on a 160 Hz low-passed copy, searched from 85–175 BPM. If full-band hits land on the

@@ -1,21 +1,18 @@
 # Changelog
 
-Every version from the first line of code. Times are local (PDT), all on 27–28 September 2026. Milestones are tagged, so
-`git show v1.1` (for example) gives the full notes and diff. Versions with a `vX.Y` tag are the milestones.
+Every version from the first line of code. Times are local (PDT), all on 27–28 September 2026. Each entry names the
+commit, so `git show <id>` gives the full notes and diff. Versions with a `vX.Y` tag are the milestones.
+
+> In the public repository, the work after v1.12 is published as one commit per theme (tag v2.0.0). The
+> commit ids named after v1.11 below are from the development history, which isn't published.
 
 ---
 
-## v0.1 — whole-brain fly simulator · Sep 27 22:04
-- Numba rewrite of the Shiu et al. 2024 leaky integrate-and-fire model on the FlyWire v783 connectome (138,639 neurons,
-  15,091,983 connections), with the same equations and parameters as the paper.
-- Exact exponential integration at dt = 0.25 ms, a delayed-synapse ring buffer, refractory periods, and Poisson
-  drive whose per-neuron rate can change at any moment.
-- **Validated** against the paper's sugar experiment: ~406 active neurons, ~20k spikes/s, feeding motor neurons firing.
-- About 0.6 s of compute per simulated second.
+## v0.1 — whole-brain fly simulator · `1d3c4d1` · Sep 27 22:04
 
-22:06 — Claude Code permission allowlist for read-only commands (from `/fewer-permission-prompts`).
+`dc10e58` · 22:06 — Claude Code permission allowlist for read-only commands (from `/fewer-permission-prompts`).
 
-## v0.2 — senses and outputs · 22:09
+## v0.2 — senses and outputs · `25a3327` · 22:09
 - Inputs chosen by real cell type from the FlyWire annotations: 12 Johnston's-organ (ear) subtypes per side, wind
   neurons, sugar and bitter taste neurons.
 - Outputs: all 1,409 descending and brain motor neurons.
@@ -23,107 +20,54 @@ Every version from the first line of code. Times are local (PDT), all on 27–28
 - Measured along the way: loud sound → giant fiber (the escape neuron); the ears are strongly lateralized; smell input
   makes the brain run away.
 
-## v0.3 — real-time server · 22:10
+## v0.3 — real-time server · `1adb815` · 22:10
 - aiohttp + WebSocket server that runs the brain in 20 ms frames locked to wall-clock time.
 - Runaway guard: resets the brain after 3 frames above 600k spikes/s.
 
-## v0.4 — parallel kernel · 22:11
+## v0.4 — parallel kernel · `3774830` · 22:11
 - Integration runs in parallel. 2.5× faster (about 4× faster than real time) and gives *identical* spikes.
 
-## v0.5 — the Fly Brain DJ app · 23:46
-- Two decks with EQ, filter, loop roll, echo, backspin and an equal-power crossfader.
-- Fly ears: deck A → left Johnston's organ, deck B → right, with habituation.
-- Fly synth: every descending/motor neuron is a key.
-- Fly DJ: the crossfader follows left/right brain activity; named neurons trigger moves; bass-swap blends.
-- Whole-brain spike map, output raster and event log.
+## v0.5 — the Fly Brain DJ app · `9dff33c` · 23:46
 
-Sep 28 00:25 — demo tracks synthesized sample by sample: 76 s → under 1 s.
-00:28 — DJ pacing: warm-up, minimum time on air, calmer effects.
-00:40 — bitter drive capped at 100 Hz (it caused runaway); debug handle `window.flyDJ`.
+`b7b5f83` · Sep 28 00:25 — demo tracks synthesized sample by sample: 76 s → under 1 s.
+`9480108` · 00:28 — DJ pacing: warm-up, minimum time on air, calmer effects.
+`cb80b82` · 00:40 — bitter drive capped at 100 Hz (it caused runaway); debug handle `window.flyDJ`.
 
-## v1.0 — first complete version · 00:52
+## v1.0 — first complete version · `826d453` · 00:52
 - `run.sh` launcher (downloads the data), README, requirements, `.gitignore`.
 - Sugar makes the fly "sing".
 - 4-minute soak test: 4 beat-matched transitions, no errors, half of real-time CPU.
 
-00:57 — burst detectors tuned so effects fire every ~8–12 s around musical events.
+`b507e04` · 00:57 — burst detectors tuned so effects fire every ~8–12 s around musical events.
 
-## v1.1 — desi beats · 01:38
-- Four synthesized desi tracks:
-  - bhangra dhol *chaal*, 116 BPM, raag Kafi
-  - tabla *keherwa* theka, 120 BPM, Yaman
-  - dholak, 118 BPM, Bhairav
-  - Bollywood disco, 124 BPM, Khamaj
-- Karplus-Strong tumbi, sitar (with *meend* glides and *jawari* buzz) and tanpura; harmonium; dhol and tabla strokes.
-- Raga scales; the fly plays **dhol with its motor neurons and sitar with its descending neurons** when a desi track is
-  on air.
-- Crate style selector (desi / club / both).
+## v1.1 — desi beats · `81fbfea` · 01:38
 
-01:45 — performance: Safari's drawing was eating ~10 cores and starving the brain. Drawing made lighter,
+`660e1b7` · 01:45 — performance: Safari's drawing was eating ~10 cores and starving the brain. Drawing made lighter,
 simulator moved to 4 threads.
-01:51 — Chimta removed; tumbi hook softened and only plays
+`ead2b90` · 01:51 — **asked:** remove "the repeating tinny sound". Chimta removed; tumbi hook softened and only plays
 half the time.
 
-## v1.2 — epic DJ · 02:06
-- Master FX rack: sweeps, trans gate, crush, flanger, reverb.
-- Sampler: air horn, siren, laser, boom, riser, dhol roll.
-- Scratching: baby, chirp, transformer, flare. Also tape stop, hot cues and beat jumps.
-- Carl Cox style **cue build & drop**, drop swap, echo out, spin cut.
-- The fly picks the transition style from its most excited neuron group; a whole-brain arousal surge triggers a build.
-- Performance pads, keyboard shortcuts, epicness slider.
+## v1.2 — epic DJ · `d987ff8` · 02:06
 
-## v1.3 — tempo control · 02:09
-- Master BPM that both decks follow, phase-locked.
-- −/+ buttons and keys, tap tempo, reset.
-- "Fly rides the tempo": arousal can push it up to ±6%.
+## v1.3 — tempo control · `841d083` · 02:09
 
-02:12 — the fly waits 15 s before its first move; crate "next" label fixed; README lists every move.
+`1362da8` · 02:12 — the fly waits 15 s before its first move; crate "next" label fixed; README lists every move.
 
-## v1.4 — the fly chooses tracks · 02:18
-- The winner loads from its intro; tracks it has already played are marked down.
+## v1.4 — the fly chooses tracks · `745d59b` · 02:18
 
-## v1.5 — adapting to new music · 02:22
-- Analysis of every new track: key (Camelot code), style, energy per bar.
-- The fly's voice follows the key, and its move set follows the style.
-- Breakdowns get space instead of chops; builds are timed to land on the track's real drop.
-- Cuts instead of blends when tempos are far apart; tempo journeys; harmonic track picking.
+## v1.5 — adapting to new music · `cc47e0f` · 02:22
 
-02:26 — git switched on; local Claude settings ignored.
-02:27 — drum & bass no longer detected at half tempo; ½× / 2× fix buttons on each deck.
-02:27 — README: how the fly adapts to new music.
+`3aae162` · 02:26 — git switched on; local Claude settings ignored.
+`87b2efb` · 02:27 — drum & bass no longer detected at half tempo; ½× / 2× fix buttons on each deck.
+`b027f9b` · 02:27 — README: how the fly adapts to new music.
 
-## Docs — this changelog, git explainer, project notes
-The history was rebuilt from the session transcript (see [GIT.md](GIT.md)) and the documentation added.
+## Docs — this changelog, git explainer, project notes · `bd7939a`
 
-## v1.6 — play like the big names
-- Research into 29 DJs, with sources in [DJ_RESEARCH.md](DJ_RESEARCH.md): Guetta, Garrix, Tiësto, Calvin Harris,
-  Swedish House Mafia, DJ Snake, Skrillex, Diplo, Aoki, Armin, Alok, Nucleya, Fred again.., Carl Cox, Hawtin,
-  de Witte, Lens, Peggy Gou, Black Coffee, Solomun, Four Tet, Jamie xx, Prydz, Fisher, John Summit, Kaytranada,
-  Qbert, A-Trak, Jazzy Jeff.
-- **"Play like…" styles.** The neurons decide when; the style decides which moves, transitions, builds, blend
-  length, time on air, home tempo and hype.
-- **New moves:**
-  - Fred again.. live chops, with the pattern written by spikes
-  - Guetta's live 303, also written by spikes
-  - sing-along drop-out
-  - Fisher's 1-bar kill
-  - double drop, mashup, Hawtin loop layering, dub throw and Model 1 resonant filter
-  - Alok's sidechain pump and the Pryda snare fill
-  - Skrillex stutter, reverse, bass tease, hard cut
-  - Qbert's crab and orbit scratches
-  - CO2 blast, snare-roll / stutter / filter builds, downlifter
-  - mids-only reverb, as Swedish House Mafia do it
-- A build-style selector and pads for everything.
+## v1.6 — play like the big names · `7d9454b`
 
-## v1.7 — stems
-- Every deck gets drums and music stems:
-  - demo tracks are rendered as stems
-  - dropped files are split by harmonic–percussive separation in a web worker (~5 s for 90 s of audio; the stems
-    add back up to the original exactly)
-- DRUMS / MUSIC mutes on each deck.
-- New moves: *drums out* and *strip to drums*. Mashups, loop layers and live chops now use the stems.
+## v1.7 — stems · `6226f87`
 
-## v1.8 — set planner
+## v1.8 — set planner · `801ce2d`
 - Energy arcs for a whole set: club night, warm-up, peak time, Guetta's yo-yo, Diplo's pop → heavy → pop,
   Kaytranada's beat tape, closing.
 - While a set runs:
@@ -132,20 +76,16 @@ The history was rebuilt from the session transcript (see [GIT.md](GIT.md)) and t
   - builds happen at peaks, breakdowns in dips
 - Live graph of the plan and of what the fly actually did.
 
-## v1.9 — the fly on the mic, set export
+## v1.9 — the fly on the mic, set export · `4325865`
 - Speech-synthesis MC with per-style lines ("Balle balle!" for desi); the fly's spikes pick the phrase.
 - Markdown set report: tracklist with how each track came in, move counts, full log.
 - Builds default to the chosen style's build.
 
-## v1.10 — key lock
+## v1.10 — key lock · `3097382`
 - AudioWorklet pitch shifter per deck, so tempo no longer changes pitch (440 Hz stays at 441 Hz at +12% / −10%).
-- with key lock on, styles can move the tempo up to 20% and blends can span 16%.
+- `40b8140`: with key lock on, styles can move the tempo up to 20% and blends can span 16%.
 
 ## v1.11 — a clean key lock
-Key lock is on by default and nearly everything plays slightly sped up or
-slowed down, so the shifter shapes all the audio.
-- The two-head shifter is replaced by **WSOLA**: grains are aligned by cross-correlation, so hits aren't doubled.
-- Measured A/B:
 
   | | Kick tightness (52% unprocessed) | 440 Hz tone at 0.9–1.12× |
   |---|---|---|
@@ -153,11 +93,3 @@ slowed down, so the shifter shapes all the audio.
   | WSOLA | 50.6–53.5% | 440.1 Hz |
 - Latency compensation: decks schedule everything that happens before the shifter 24 ms early, so key-locked decks
   land on the beat grid with rolls, scratches, the synth and the sampler. Deck-vs-grid offset: 24.7 ms → 0.7 ms.
-
-## v1.12 — open-source release
-- The project is now **Fly With Me**, released under **Apache-2.0**, with a `NOTICE` covering the MIT brain model it
-  builds on and the CC BY-NC 4.0 FlyWire data.
-- Added `CITATION.cff` and `CONTRIBUTING.md`, plus `python -m flybrain.validate`, which reproduces the paper's
-  sugar experiment (394 active neurons; the paper reports ~400).
-- `run.sh` now works on Linux as well as macOS and checks dependencies. Requirements have version ranges.
-- A disclaimer that the DJ styles are interpretations and not affiliated with the artists.

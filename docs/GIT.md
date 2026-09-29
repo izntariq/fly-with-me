@@ -5,14 +5,14 @@ per step, dated when it actually happened.
 
 ## How this history was made
 
-Git was switched on partway through the build. To get **every version from the
+Git was switched on partway through the build (at the "keep a git history" request). To get **every version from the
 start**, the history was rebuilt afterwards from the Claude Code session transcript, which records every file write
 and edit in order:
 
 1. Every file change from the session was replayed, in order, into an empty folder.
 2. The replay was checked to end **byte-for-byte identical** to the working project.
 3. The changes were grouped into logical versions. Each one became a commit, with its original timestamp and notes
-   on what changed and why.
+   on what was asked for and what changed.
 
 So every commit is a real state the code was in at that time, not a summary.
 
@@ -20,8 +20,8 @@ So every commit is a real state the code was in at that time, not a summary.
 
 | Word | Meaning here |
 |---|---|
-| **commit** | A saved snapshot of the whole project, plus a message saying what changed and why. Each has a short id (seven hex characters). |
-| **branch** | A named line of commits. `main` is the history. |
+| **commit** | A saved snapshot of the whole project, plus a message saying what changed and why. Each has a short id like `81fbfea`. |
+| **branch** | A named line of commits. `main` is the real history. |
 | **tag** | A permanent name on one commit. The versions are tagged `v0.1` … `v1.5`. |
 | **HEAD** | "Where you are right now", normally the newest commit on `main`. |
 | **working tree** | The actual files in the folder. `git status` shows what you've changed since the last commit. |
@@ -80,8 +80,8 @@ Avoid `git reset --hard` unless you're sure: it discards uncommitted work.
 
 ## How new work gets committed
 
-Each working, tested change gets its own commit, with a subject line saying what changed and a body saying why and
-anything measured. Bigger features also get a version tag (`git tag -a v1.6 -m "…"`).
+Each working, tested change gets its own commit, with a subject line saying what changed and a body saying why, what
+was asked for, and anything measured. Bigger features also get a version tag (`git tag -a v1.6 -m "…"`).
 
 There is no remote yet, so the history lives only on this Mac. To back it up on GitHub:
 

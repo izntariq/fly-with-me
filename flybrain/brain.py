@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import json
 import os
 
 from numba import njit, prange, set_num_threads
@@ -214,6 +215,14 @@ class Brain:
                  self.n_dly, self.kick, self._spk_idx, self._spk_step)
         self.step += n_steps
         return self._spk_idx[:k].copy(), self._spk_step[:k] * self.p.dt
+
+    def load_trained(self, path) -> dict:
+        """Apply learned synaptic weights (from flybrain.train) on top of the connectome. Returns the file's metadata."""
+        z = np.load(path)
+        self.weights[z["K"]] = z["weights"]
+        self.trained = {"file": str(path), "synapses": int(len(z["K"])), "epoch": int(z["epoch"]),
+                        "intents": json.loads(str(z["intents"]))}
+        return self.trained
 
     def reset(self):
         self.v[:] = self.p.v_0

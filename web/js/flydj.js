@@ -64,6 +64,16 @@ export class FlyDJ {
       if (typeOk && clsOk && sideOk) { m.slots.push(i); moveOf[i].push(k); }
     }));
     this.moveOf = moveOf;
+    // intent groups split by brain side: the ears are ~30x ipsilateral, so the left-side neurons hear deck A (left ear)
+    // and the right-side ones deck B — section sense reads only the side of the deck that's on air
+    this.sideKeys = ['echo', 'scratch', 'trans'];
+    this.sideIdx = outputs.map((o, i) => {
+      const k = this.sideKeys.findIndex((key) => this.moves.find((m) => m.key === key).slots.includes(i));
+      return k < 0 ? -1 : k * 2 + (o.side === 'right' ? 1 : 0);
+    });
+    this.sideN = new Float32Array(6);
+    this.sideIdx.forEach((j) => { if (j >= 0) this.sideN[j]++; });
+    this.sideHz = new Float32Array(6);
     this.byKey = Object.fromEntries(this.moves.map((m) => [m.key, m]));
     this.sideOf = outputs.map((o) => (o.cls === 'descending' ? (o.side === 'left' ? -1 : o.side === 'right' ? 1 : 0) : 0));
     this.steerSlots = new Set(this.byKey.steer.slots);
@@ -81,12 +91,79 @@ export class FlyDJ {
     this.onAirSince = 0;
     this.lastAny = -1e9; this.lastBuild = -1e9; this.lastHorn = -1e9;
     this.onArrive = null;     // (deck, {snap, at}) => void — a new track is now the one on air
+    this.trained = false;     // a brain trained by flybrain.train: its MIX neurons flag mixing windows
+    // section sense from intent neurons, with detectors picked on the training tracks (docs/TRAINING.md):
+    //   SPACE (echo group, trained only): 4 s rate ranks in the top 5% of the last 2 min  -> we're in a breakdown
+    //   PEAK (scratch group): 4 s rate > 1.9x its 2-min average                         -> we're in a main section
+    this.sense = { space: { f: [0, 0], hist: [[], []], on: false }, peak: { f: [0, 0], l: [0, 0], on: false },
+                   mix: { f: [0, 0], s: [0, 0] } };
     this.persona = STYLES.fly; // "play like" DJ style: flavours which moves, transitions and builds the fly uses
     this.frameCounts = [];    // recent per-frame descending-neuron spike counts (for spike-driven chop patterns)
     this.mc = null;           // MC voice (mc.js)
   }
 
   setPersona(key) { this.persona = STYLES[key] || STYLES.fly; }
+
+  // trained readout (brains/readout.json): for each section, the specific trained neurons that signal it, with the
+  // z-score stats and on/off thresholds picked on the training tracks
+  setReadout(readout, outputs) {
+    const slotOf = new Map(outputs.map((o, i) => [o.id, i]));
+    this.readout = {};
+    for (const [name, r] of Object.entries(readout || {})) {
+      const ns = r.neurons.map((n) => ({ slot: slotOf.get(n.id), side: n.side === 'right' ? 1 : 0, mu: n.mu, sd: n.sd })).filter((n) => n.slot != null);
+      this.readout[name] = { ns, on: r.on, off: r.off, tau: r.tau_s, rate: new Float32Array(ns.length), z: [0, 0], active: false };
+    }
+    this.readoutSlot = new Map();
+    for (const [name, r] of Object.entries(this.readout)) r.ns.forEach((n, i) => this.readoutSlot.set(n.slot, [name, i]));
+  }
+
+  updateSense(dt) {
+    const sp = this.sense.space, pk = this.sense.peak, mx = this.sense.mix;
+    const tick = (this._senseTick = (this._senseTick || 0) + 1) % 10 === 0;
+    for (let side = 0; side < 2; side++) {
+      const hz = (g) => this.sideHz[g * 2 + side];                // per-neuron rate on this side, this frame
+      sp.f[side] += (hz(0) - sp.f[side]) * dt / 4;
+      pk.f[side] += (hz(1) - pk.f[side]) * dt / 4; pk.l[side] += (hz(1) - pk.l[side]) * dt / 120;
+      mx.f[side] += (hz(2) - mx.f[side]) * dt / 0.3; mx.s[side] += (hz(2) - mx.s[side]) * dt / 10;
+      if (tick) { sp.hist[side].push(sp.f[side]); if (sp.hist[side].length > 600) sp.hist[side].shift(); }
+    }
+    // read the side of the on-air deck (split ears); in room mode both ears hear the same mix, so average them
+    const split = this.ears.mode === 'split', side = this.mixer.onAir() === this.mixer.decks[0] ? 0 : 1;
+    const pickF = (arr) => (split ? arr[side] : (arr[0] + arr[1]) / 2);
+    const hist = split ? sp.hist[side] : sp.hist[0].map((v, i) => (v + (sp.hist[1][i] ?? v)) / 2);
+    const cur = pickF(sp.f);
+    const rank = hist.length > 150 ? hist.filter((v) => v < cur).length / hist.length : 0;
+    let spaceOn = this.trained && rank > 0.95, peakOn = this.t > 30 && pickF(pk.f) > 1.9 * (pickF(pk.l) + 0.5);
+    if (this.readout?.SPACE) {
+      // trained readout: z-scored rate of the chosen neurons (on-air side in split mode), 4 s smoothing, hysteresis
+      const state = {};
+      for (const [name, r] of Object.entries(this.readout)) {
+        for (const sd of [0, 1]) {
+          const idx = r.ns.map((n, i) => (n.side === sd ? i : -1)).filter((i) => i >= 0);
+          const zNow = idx.length ? idx.reduce((acc, i) => acc + (r.rate[i] - r.ns[i].mu) / r.ns[i].sd, 0) / idx.length : 0;
+          r.z[sd] += (zNow - r.z[sd]) * dt / r.tau;
+        }
+        const z = split ? r.z[side] : (r.z[0] + r.z[1]) / 2;
+        r.active = r.active ? z > r.off : z > r.on;
+        state[name] = r.active;
+      }
+      spaceOn = !!state.SPACE; peakOn = this.t > 30 && !!state.PEAK;
+      if (state.MIX) this.mixWindow = this.mixer.ctx.currentTime + 8 * this.beat();   // held open while MIX is on
+      if (state.MIX && !this._mixOn) this.log('<b>MIX neurons</b> (trained readout) sense a <b>mixing window</b>');
+      this._mixOn = !!state.MIX;
+    }
+    // trained MIX neurons on the on-air side bursting → a mixing window (intro / outro) for the next 32 beats
+    if (this.trained && !this.readout?.MIX && pickF(mx.f) > pickF(mx.s) * 1.3 + 3) {
+      const now = this.mixer.ctx.currentTime;
+      if (!(now < this.mixWindow)) this.log('<b>MIX neurons</b> (trained, on-air side) burst → mixing window open');
+      this.mixWindow = now + 32 * this.beat();
+    }
+    if (spaceOn && !sp.on) {
+      this.log('<b>SPACE neurons</b> (trained) sense a <b>breakdown</b>');
+      if (this.auto && this.t > 15 && !this.perf.busy()) this.doMove(this.mixer.onAir().hasStems && Math.random() < 0.3 ? 'drumsout' : (this.frameCounts.at(-1) % 2 ? 'reverb' : 'echo'), '<b>SPACE neurons</b>');
+    }
+    sp.on = spaceOn; pk.on = peakOn;
+  }
   // the fly on the mic; its latest spike count picks the phrase
   shout(kind = 'hype', delay = 0) {
     this.mc?.shout({ persona: this.persona.key === 'fly' ? null : this.persona, desi: this.mixer.onAir().track?.style === 'desi', kind, delay, pickN: this.frameCounts.at(-1) || 0 });
@@ -152,13 +229,22 @@ export class FlyDJ {
   onFrame(spikes, dtMs) {
     const dt = dtMs / 1000;
     const counts = new Float32Array(this.moves.length);
+    const sideC = new Float32Array(6);
     let L = 0, R = 0;
     for (const [s] of spikes) {
       for (const k of this.moveOf[s]) counts[k]++;
+      if (this.sideIdx[s] >= 0) sideC[this.sideIdx[s]]++;
       const w = this.steerSlots.has(s) ? 8 : 1;
       if (this.sideOf[s] < 0) L += w; else if (this.sideOf[s] > 0) R += w;
     }
     this.frameCounts.push(L + R); if (this.frameCounts.length > 64) this.frameCounts.shift();
+    for (let j = 0; j < 6; j++) this.sideHz[j] = sideC[j] / dt / Math.max(1, this.sideN[j]);
+    if (this.readout) {
+      const cnt = new Map();
+      for (const [s] of spikes) if (this.readoutSlot.has(s)) cnt.set(s, (cnt.get(s) || 0) + 1);
+      const a = Math.exp(-dtMs / 200);
+      for (const r of Object.values(this.readout)) r.ns.forEach((n, i) => { r.rate[i] = a * r.rate[i] + (1 - a) * (cnt.get(n.slot) || 0) / dt; });
+    }
     const now = this.mixer.ctx.currentTime, beat = this.beat();
     const a = this.aud;
     if (a && now - a.t0 > 1.2) { a.acc += a.deck === 0 ? L : R; a.n += dt; }
@@ -173,13 +259,16 @@ export class FlyDJ {
             && now - this.lastAny > 4 * beat * cs) {
           const sec = this.section();
           let key = prof.remap?.[m.key] ?? m.key;
-          if (sec.energy < 0.4) key = BREAKDOWN[key] ?? key;                   // breakdown: space, not chops
+          if (sec.energy < 0.4 || this.sense.space.on) key = BREAKDOWN[key] ?? key;   // breakdown: space, not chops
+          if (m.key === 'scratch' && !this.sense.peak.on) return;              // flourishes only in a main section
           if (sec.afterDrop && key !== 'echo' && key !== 'reject') return;      // let the drop breathe
           m.lastFire = now; this.lastAny = now; m.fired = performance.now();
           this.fire(key, m.label, m.fast / (m.slow + 1), counts[k]);
         }
       }
     });
+
+    this.updateSense(dt);
 
     // arousal: the whole descending population surging relative to its recent past
     const ar = this.byKey.arousal;
@@ -360,7 +449,11 @@ export class FlyDJ {
     if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud) {
       const onIdx = onAir === A ? 0 : 1, dir = onAir === A ? 1 : -1;
       const [minOn, maxOn] = this.persona.onAir || [0, Infinity];
-      const wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn;
+      // trained brain: its MIX neurons (DNb06 · DNge113 · DNge145) learned to fire in intros and outros
+      const mixReady = this.trained && now < this.mixWindow;
+      const wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn
+        || (mixReady && this.onAirSince > Math.max(20, minOn) && this.ears.habit[onIdx] >= 0.1);
+
       if (wants || endingSoon) {
         const style = endingSoon && !wants ? 'blend' : this.chooseStyle();
         // start on the next 16-beat phrase line (a bar early for cuts, so the cut itself lands on the phrase)
