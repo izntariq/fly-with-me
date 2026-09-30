@@ -3,3 +3,4 @@ pandas
 pyarrow
 numba
 aiohttp
+mlx; platform_system == "Darwin" and platform_machine == "arm64"   # GPU (Apple silicon)

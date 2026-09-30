@@ -152,13 +152,36 @@ tempo* on, arousal pushes the BPM up by as much as 6%. **Epicness** scales how o
 The whole brain view is a frontal projection of every neuron: blue = sensory inputs, magenta = outputs, orange =
 everything in between. The raster shows all 1,409 output neurons over the last 4 s.
 
+## Visualiser
+
+**🧠 Visualiser** (top right of the app) opens `viz.html` in its own window, so you can put it on a second screen. It
+shows each fly's whole brain in 3D, at the real FlyWire position of every neuron and coloured by class. Every spike lights
+up as it happens.
+
+With three flies, the two listener flies sit on top, each with its MIX / SPACE / PEAK sense meters. Their tapped descending
+neurons stream into the DJ fly's left and right ears. These are the same taps the server wires into its ear bands.
+
+A small panel on the side shows:
+- the move being made, and the neurons whose burst fired it (they ring in the brain, with a line from the card)
+- the transition queued for the next phrase, with a countdown
+- the countdown to a drop
+- the recent moves and the decks
+
+The background flashes each move's colour, and transitions and drops send a shockwave through the brain. Keys: **H**
+hides the panel, **F** goes full screen.
+
+Brain activity comes straight from the brain server. The moves, decks and beat come from the DJ app over a
+`BroadcastChannel`, so open the visualiser from the app, in the same browser.
+
 ## Layout
 
 ```
 flybrain/brain.py     Numba LIF simulator (Shiu et al. model)
 flybrain/mapping.py   sensory inputs / DN+MN outputs from FlyWire annotations
+flybrain/gpu.py       the flies on the GPU (Apple silicon, MLX Metal kernels), all stepped together
 flybrain/server.py    aiohttp server: runs the brain in real time, streams spikes over WebSocket
-web/js/main.js        wiring: connection, crate, control loop, UI, keyboard, tempo
+web/js/main.js        wiring: connection, crate, control loop, UI, keyboard, tempo, visualiser feed
+web/js/visualiser.js  viz.html: 3D brains (WebGL2), spikes, listener → DJ fly streams, move overlay
 web/js/decks.js       two decks: EQ, filter, rolls, scratching, brake, hot cues; crossfader; master bus
 web/js/fx.js          master FX rack (sweeps, trans, crush, flanger, reverb) + sampler (horn, siren, boom…)
 web/js/perform.js     DJ moves shared by fly and human: cue build & drop, drop swap, echo out, spin cut…

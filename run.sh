@@ -16,4 +16,7 @@ fi
 
 PORT="${PORT:-8765}"
 ( sleep 4 && open "http://localhost:$PORT" ) >/dev/null 2>&1 &
-exec python3 -m flybrain.server --port "$PORT" "$@"
+# the project environment (.venv, with MLX for the GPU) if it exists, else the system python
+PY=python3
+[ -x .venv/bin/python ] && PY=.venv/bin/python
+exec "$PY" -m flybrain.server --port "$PORT" "$@"

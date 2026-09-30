@@ -158,6 +158,100 @@ def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
     return n_spk
 
 
+@njit(cache=True, fastmath=True, nogil=True)
+def _run_active(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
+                stim_idx, v_0, v_th, v_rst, dv_decay, g_decay, k_gv, n_ref, n_dly,
+                kick, spk_idx, spk_step, act, flag, n_act):
+    """Event-driven version of _run: only neurons on the active list (received input, not yet back at rest) are
+    updated. Same equations; typically a few percent of the brain is active, so this is several times faster.
+    act[:n_act] = active neurons, flag[i] = 1 if i is on the list. Returns (n_spikes, n_act)."""
+    D = ring.shape[0]
+    n_spk = 0
+    cap = spk_idx.shape[0]
+    for t in range(n_steps):
+        step = step0 + t
+        buf = ring[step % D]
+        out = ring[(step + n_dly) % D]
+        k = 0
+        n_now = n_act
+        while k < n_now:
+            i = act[k]
+            gi = g[i] + buf[i]
+            buf[i] = 0.0
+            if ref[i] > 0:
+                ref[i] -= 1
+                g[i] = gi
+                k += 1
+                continue
+            vi = v[i]
+            u = vi - v_0
+            vi = v_0 + u * dv_decay + gi * k_gv
+            gi = gi * g_decay
+            if abs(gi) < 1e-6:
+                gi = 0.0
+            if vi > v_th:
+                vi = v_rst
+                gi = 0.0
+                ref[i] = n_ref
+                if n_spk < cap:
+                    spk_idx[n_spk] = i
+                    spk_step[n_spk] = step
+                    n_spk += 1
+                for s_ in range(indptr[i], indptr[i + 1]):
+                    j = indices[s_]
+                    out[j] += weights[s_]
+                    if flag[j] == 0:
+                        flag[j] = 1
+                        act[n_act] = j
+                        n_act += 1
+            elif abs(u) < 1e-5 and gi == 0.0:
+                vi = v_0
+            v[i] = vi
+            g[i] = gi
+            # back at rest with nothing pending: leave the active list (swap-remove)
+            if vi == v_0 and gi == 0.0 and ref[i] == 0:
+                pending = False
+                for d in range(D):
+                    if ring[d][i] != 0.0:
+                        pending = True
+                        break
+                if not pending:
+                    flag[i] = 0
+                    n_act -= 1
+                    act[k] = act[n_act]
+                    if n_act < n_now:
+                        n_now -= 1
+                        continue
+                    continue
+            k += 1
+        for jj in range(stim_idx.shape[0]):
+            p = rates_p[jj]
+            if p <= 0.0:
+                continue
+            if np.random.random() < p:
+                i = stim_idx[jj]
+                v[i] += kick
+                if flag[i] == 0:
+                    flag[i] = 1
+                    act[n_act] = i
+                    n_act += 1
+                if v[i] > v_th:
+                    v[i] = v_rst
+                    g[i] = 0.0
+                    if n_spk < cap:
+                        spk_idx[n_spk] = i
+                        spk_step[n_spk] = step
+                        n_spk += 1
+                    for s_ in range(indptr[i], indptr[i + 1]):
+                        j = indices[s_]
+                        out[j] += weights[s_]
+                        if flag[j] == 0:
+                            flag[j] = 1
+                            act[n_act] = j
+                            n_act += 1
+    return n_spk, n_act
+
+
 @njit(cache=True)
 def _seed(seed):
     np.random.seed(seed)
@@ -195,6 +289,11 @@ class Brain:
 
         self._spk_idx = np.zeros(2_000_000, np.int64)
         self._spk_step = np.zeros(2_000_000, np.int64)
+        # event-driven kernel state (FLYBRAIN_KERNEL=dense falls back to visiting every neuron each step)
+        self.event = os.environ.get("FLYBRAIN_KERNEL", "event") == "event"
+        self._act = np.zeros(self.n, np.int32)
+        self._flag = np.zeros(self.n, np.uint8)
+        self._n_act = 0
 
     @property
     def t_ms(self) -> float:
@@ -209,12 +308,32 @@ class Brain:
         """Simulate `ms` milliseconds. Returns (neuron_idx, time_ms) arrays of spikes."""
         n_steps = int(round(ms / self.p.dt))
         p_spk = np.clip(self.stim_rate_hz * self.p.dt * 1e-3, 0.0, 1.0)
-        k = _run(n_steps, self.step, self.v, self.g, self.ref, self.ring, self.indptr,
-                 self.indices, self.weights, p_spk, self.stim_idx, self.p.v_0, self.p.v_th,
-                 self.p.v_rst, self.dv_decay, self.g_decay, self.k_gv, self.n_ref,
-                 self.n_dly, self.kick, self._spk_idx, self._spk_step)
+        if self.event:
+            k, self._n_act = _run_active(n_steps, self.step, self.v, self.g, self.ref, self.ring, self.indptr,
+                                         self.indices, self.weights, p_spk, self.stim_idx, self.p.v_0, self.p.v_th,
+                                         self.p.v_rst, self.dv_decay, self.g_decay, self.k_gv, self.n_ref,
+                                         self.n_dly, self.kick, self._spk_idx, self._spk_step,
+                                         self._act, self._flag, self._n_act)
+        else:
+            k = _run(n_steps, self.step, self.v, self.g, self.ref, self.ring, self.indptr,
+                     self.indices, self.weights, p_spk, self.stim_idx, self.p.v_0, self.p.v_th,
+                     self.p.v_rst, self.dv_decay, self.g_decay, self.k_gv, self.n_ref,
+                     self.n_dly, self.kick, self._spk_idx, self._spk_step)
         self.step += n_steps
         return self._spk_idx[:k].copy(), self._spk_step[:k] * self.p.dt
+
+    def sibling(self) -> "Brain":
+        """Another fly with the same wiring (arrays shared, read-only) but its own membrane state and input."""
+        o = object.__new__(Brain)
+        o.__dict__.update({k: v for k, v in self.__dict__.items()
+                           if k not in ("v", "g", "ref", "ring", "step", "stim_idx", "stim_rate_hz", "_spk_idx",
+                                        "_spk_step", "_act", "_flag", "_n_act")})
+        o.v = np.full(self.n, self.p.v_0, np.float32); o.g = np.zeros(self.n, np.float32)
+        o.ref = np.zeros(self.n, np.int32); o.ring = np.zeros_like(self.ring); o.step = self.step
+        o.stim_idx = np.zeros(0, np.int64); o.stim_rate_hz = np.zeros(0, np.float64)
+        o._spk_idx = np.zeros_like(self._spk_idx); o._spk_step = np.zeros_like(self._spk_step)
+        o._act = np.zeros(self.n, np.int32); o._flag = np.zeros(self.n, np.uint8); o._n_act = 0
+        return o
 
     def load_trained(self, path) -> dict:
         """Apply learned synaptic weights (from flybrain.train) on top of the connectome. Returns the file's metadata."""
@@ -229,3 +348,5 @@ class Brain:
         self.g[:] = 0
         self.ref[:] = 0
         self.ring[:] = 0
+        self._flag[:] = 0
+        self._n_act = 0

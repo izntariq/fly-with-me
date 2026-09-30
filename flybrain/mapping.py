@@ -14,6 +14,10 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 ANNOT = ROOT / "data" / "neuron_annotations.tsv"
 XY_CACHE = ROOT / "data" / "brain_xy.bin"
+XYZ_CACHE = ROOT / "data" / "brain_xyz.bin"
+# super-classes, in the order the visualiser colours them (web/js/visualiser.js); class code = index + 1, 0 = unknown
+SUPER_CLASSES = ["optic", "central", "sensory", "visual_projection", "ascending", "descending", "sensory_ascending",
+                 "visual_centrifugal", "motor", "endocrine"]
 
 # Johnston's organ (the fly's ear, in the antenna). JO-B neurons respond to
 # low-frequency sound (courtship song), JO-A to higher-frequency vibration.
@@ -90,4 +94,21 @@ def brain_xy(ann: pd.DataFrame, ids: np.ndarray) -> bytes:
     q = np.zeros((len(ids), 2), np.uint16)
     q[ok] = 1 + ((pos[ok] - lo) / span * 65534).astype(np.uint16)
     XY_CACHE.write_bytes(q.tobytes())
+    return q.tobytes()
+
+
+def brain_xyz(ann: pd.DataFrame, ids: np.ndarray) -> bytes:
+    """3D positions + super-class per neuron, as 4 x uint16: x, y, z on one common scale (so the brain keeps its
+    shape; 0,0,0 = unknown) and the class code (SUPER_CLASSES index + 1). FlyWire positions are 4 x 4 x 40 nm voxels."""
+    if XYZ_CACHE.exists():
+        return XYZ_CACHE.read_bytes()
+    a = ann.reindex(ids)
+    pos = a[["pos_x", "pos_y", "pos_z"]].to_numpy(np.float64) * np.array([4.0, 4.0, 40.0])
+    ok = ~np.isnan(pos).any(1)
+    lo = pos[ok].min(0)
+    span = (pos[ok].max(0) - lo).max()
+    q = np.zeros((len(ids), 4), np.uint16)
+    q[ok, :3] = 1 + ((pos[ok] - lo) / span * 65534).astype(np.uint16)
+    q[:, 3] = a["super_class"].map({c: i + 1 for i, c in enumerate(SUPER_CLASSES)}).fillna(0).to_numpy(np.uint16)
+    XYZ_CACHE.write_bytes(q.tobytes())
     return q.tobytes()

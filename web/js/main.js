@@ -1,7 +1,7 @@
 import { Mixer } from './decks.js';
 import { Ears } from './ears.js';
 import { FlySynth } from './synth.js';
-import { FlyDJ } from './flydj.js';
+import { FlyDJ, MOVES } from './flydj.js';
 import { Performer } from './perform.js';
 import { STYLES } from './djstyles.js';
 import { ARCS, energyAt } from './setplan.js';
@@ -19,8 +19,14 @@ const S = {
   stats: { spikes: 0, frames: 0, load: 0, t: 0 }, nextGrid: 0, started: false, lastDrive: 0,
 };
 
+// the visualiser (viz.html, its own window) hears the moves, decks and beat on this channel
+const bus = 'BroadcastChannel' in window ? new BroadcastChannel('flybrain-dj') : null;
+const absNow = () => performance.timeOrigin + performance.now();          // ms, the same clock in every window
+
 // ---------------- log ----------------
 function log(html) {
+  S.logN = (S.logN || 0) + 1; S.lastLog = html;
+  bus?.postMessage({ type: 'log', html, t: absNow() });
   const li = document.createElement('li');
   const t = S.ctx ? S.ctx.currentTime : 0;
   (S.history ||= []).push({ t, text: html.replace(/<[^>]+>/g, '') });
@@ -49,7 +55,8 @@ async function onHello(h) {
   if (S.hello) return;
   S.hello = h;
   const tb = h.trained;
-  $('#st-brain').textContent = tb ? `trained brain · ${tb.synapses.toLocaleString()} learned synapses` : 'naive brain';
+  const nf = h.flies || 1;
+  $('#st-brain').textContent = (nf > 1 ? `${nf} flies · ` : '') + (tb ? `trained brain · ${tb.synapses.toLocaleString()} learned synapses` : 'naive brain');
   $('#st-brain').className = 'pill ' + (tb ? 'trained' : 'naive');
   $('#splash-msg').textContent = `connected: ${h.n_neurons.toLocaleString()} neurons, ${h.inputs.length} sensory channels, ${h.outputs.length} output neurons`;
   const buf = await (await fetch('brain_xy.bin')).arrayBuffer();
@@ -62,11 +69,17 @@ async function onHello(h) {
 function onFrame(f) {
   S.stats.spikes += f.n; S.stats.frames++; S.stats.load = S.stats.load * 0.9 + f.load * 0.1; S.stats.t = f.t;
   if (f.reset) log('<b>runaway activity</b> (seizure-like) detected → brain reset');
-  S.brainView?.addSpikes(f.viz);
+  // which fly performs: the DJ fly when chained (3), the on-air deck's fly with 2, the only fly with 1
+  const flies = S.hello.flies || 1;
+  const onIdx = S.mixer ? (S.mixer.onAir() === S.mixer.decks[0] ? 0 : 1) : 0;
+  const k = flies === 3 ? 2 : flies === 2 ? onIdx : 0;
+  const out = f.outs ? f.outs[k] : f.out, viz = f.vizs ? f.vizs[k] : f.viz;
+  S.brainView?.addSpikes(viz);
   if (!S.started) return;
-  S.raster.add(f.out);
-  S.dj.onFrame(f.out, S.hello.frame_ms);
-  S.synth.addSpikes(f.out, S.ctx.currentTime);
+  S.raster.add(out);
+  if (flies >= 2) S.dj.onListeners(f.outs[0], f.outs[1], S.hello.frame_ms);
+  S.dj.onFrame(out, S.hello.frame_ms);
+  S.synth.addSpikes(out, S.ctx.currentTime);
 }
 
 function send(obj) { if (S.ws?.readyState === 1) S.ws.send(JSON.stringify(obj)); }
@@ -206,9 +219,16 @@ async function start() {
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
   S.dj.trained = !!S.hello.trained;
-  if (S.hello.trained?.readout) S.dj.setReadout(S.hello.trained.readout, S.hello.outputs);
+  if (S.hello.trained?.readout) {
+    if ((S.hello.flies || 1) >= 2) S.dj.setListeners(S.hello.trained.readout, S.hello.outputs);
+    else S.dj.setReadout(S.hello.trained.readout, S.hello.outputs);
+  }
+  if ((S.hello.flies || 1) >= 2) S.ears.listenRaw();
+  if ((S.hello.flies || 1) === 3) log('🪰🪰🪰 <b>three flies</b>: a listener fly on each deck (each hears its deck in both ears) feeds a <b>DJ fly</b> — its left ear hears listener A, its right ear listener B');
+  else if ((S.hello.flies || 1) === 2) log('🪰🪰 <b>two flies</b>: one listener per deck; the on-air deck\'s fly performs');
   if (S.hello.trained) log(`this fly's brain is <b>trained</b>: ${S.hello.trained.synapses.toLocaleString()} synapses learned when a DJ builds, leaves space, mixes and peaks`);
   S.mc = S.dj.mc = new MC(log);
+  hookVisualiser();
   S.mc.enabled = $('#mc').checked;
   // the MC hypes builds: "are you ready?" halfway, the shout lands on the drop
   S.perf.buildKind = buildKind;
@@ -262,13 +282,22 @@ async function start() {
 let lastCtl = performance.now();
 function control() {
   const now = performance.now(), dt = Math.min(0.2, (now - lastCtl) / 1000); lastCtl = now;
-  const lv = { ...S.ears.update(dt) };
-  lv.sugar = now < S.feed.sugar ? 1 : 0;
-  lv.bitter = now < S.feed.bitter ? 1 : 0;
-  lv.wind = S.wind;
-  send({ type: 'drive', levels: lv });
-  S.levels = lv;
+  const feed = { sugar: now < S.feed.sugar ? 1 : 0, bitter: now < S.feed.bitter ? 1 : 0, wind: S.wind };
+  const flies = S.hello.flies || 1;
+  if (flies >= 2) {
+    // one listener fly per deck, each hearing its deck in both ears; taste and wind go to the performing fly
+    const [a, b] = S.ears.updatePerDeck(dt);
+    if (flies === 3) send({ type: 'drive', levels: a, levels2: b, levels3: feed });
+    else send({ type: 'drive', levels: { ...a, ...feed }, levels2: { ...b, ...feed } });
+    S.levels = { ...Object.fromEntries(Object.entries(a).filter(([k]) => k.startsWith('earL'))),
+                 ...Object.fromEntries(Object.entries(b).filter(([k]) => k.startsWith('earR'))) };
+  } else {
+    const lv = { ...S.ears.update(dt), ...feed };
+    send({ type: 'drive', levels: lv });
+    S.levels = lv;
+  }
   S.dj.tick(dt);
+  if (now - (S.busAt || 0) > 100) { S.busAt = now; postState(); }
 
   // master tempo (your setting + the fly's ride), glided so changes sound like riding the pitch fader
   if (S.tempo) {
@@ -544,7 +573,105 @@ function drawArc(nowMs) {
   if ($('#epic') !== document.activeElement) $('#epic').value = S.dj.epic;
 }
 
+// ---------------- visualiser feed ----------------
+// Every move goes through the Performer, whoever makes it, so its methods are wrapped: a call that logged something
+// happened, and becomes one 'move' event. What caused it rides along in S.trigger: the neuron group whose burst fired
+// it (FlyDJ.fire), the transition that came due (FlyDJ.tick), or else it's read from the "who" text.
+const ACTS = ['beatFx', 'roll', 'scratch', 'brake', 'backspin', 'sample', 'buildDrop', 'chop', 'doubleDrop', 'mashup', 'layer',
+  'drumsOut', 'melodyOut', 'stutter', 'reverse', 'bassTease', 'dub', 'resFilter', 'pump', 'singalong', 'fill', 'acid',
+  'killDrop', 'hardCut', 'echoOut', 'dropSwap', 'spinCut'];
+const ARG_AT = { beatFx: 0, roll: 0, scratch: 0, sample: 0 };        // the rest take (who) or ({ bars, who })
+const STYLE_GROUP = { drop: 'escape', echo: 'echo', spin: 'reject', cut: 'trans', double: 'arousal', kill: 'flange', blend: 'steer' };
+
+function ctxToAbs(t) {
+  const ts = S.ctx.getOutputTimestamp?.();
+  if (ts?.performanceTime) return performance.timeOrigin + ts.performanceTime + (t - ts.contextTime) * 1000;
+  return absNow() + (t - S.ctx.currentTime) * 1000;
+}
+
+function performer() {
+  const flies = S.hello.flies || 1, onIdx = S.mixer.onAir() === S.mixer.decks[0] ? 0 : 1;
+  return flies === 3 ? 2 : flies === 2 ? onIdx : 0;
+}
+
+function moveEvent(act, args, ret) {
+  const who = args.map((a) => (typeof a === 'string' ? a : a?.who)).filter((w) => typeof w === 'string' && w).pop() || '';
+  const text = who.replace(/<[^>]+>/g, '');
+  const arg = act in ARG_AT ? args[ARG_AT[act]] : act === 'blend' ? args[0] : (args[0]?.bars ?? null);
+  let group = S.trigger?.group || null, fly = performer();
+  if (!group && /SPACE neurons/.test(text)) {
+    group = 'SPACE';
+    if ((S.hello.flies || 1) >= 2) fly = S.mixer.onAir() === S.mixer.decks[0] ? 0 : 1;   // the on-air deck's listener
+  } else if (!group && /arousal surge/.test(text)) group = 'arousal';
+  else if (!group && /motor neurons/.test(text)) group = 'sing';
+  const beats = act in ARG_AT && act !== 'sample' ? (typeof args[1] === 'number' ? args[1] : 1)
+    : act === 'blend' ? 4 * (S.dj.persona.blendBars || 8) : typeof args[0]?.bars === 'number' ? 4 * args[0].bars : null;
+  const ev = { type: 'move', act, arg, beats, who: text, by: !text || text === 'you' ? 'you' : /set plan/.test(text) ? 'plan' : 'fly',   // the fly always names itself
+    group, fly, intensity: S.trigger?.intensity ?? null, transition: S.trigger?.transition ?? null,
+    lands: typeof ret === 'number' && ret > S.ctx.currentTime ? ctxToAbs(ret) : null,
+    text: (S.lastLog || '').replace(/<[^>]+>/g, ''), t: absNow() };
+  (S.recentMoves ||= []).push(ev);
+  if (S.recentMoves.length > 16) S.recentMoves.shift();
+  bus?.postMessage(ev);
+}
+
+function hookVisualiser() {
+  const P = S.perf, dj = S.dj;
+  let depth = 0;
+  for (const name of ACTS) {
+    const f = P[name].bind(P);
+    P[name] = (...args) => {
+      const n0 = S.logN || 0;
+      depth++;
+      let r;
+      try { r = f(...args); } finally { depth--; }
+      if (depth === 0 && (S.logN || 0) > n0) { S.moved = true; moveEvent(name, args, r); }
+      return r;
+    };
+  }
+  const fire = dj.fire.bind(dj);
+  dj.fire = (key, label, intensity, count) => {
+    S.trigger = { group: MOVES.find((m) => m.label === label)?.key || key, intensity };
+    try { return fire(key, label, intensity, count); } finally { S.trigger = null; }
+  };
+  const tick = dj.tick.bind(dj);
+  dj.tick = (dt) => {
+    const p = dj.pending, due = p && S.ctx.currentTime >= p.at;
+    if (due) { S.trigger = { group: STYLE_GROUP[p.style], transition: p.style }; S.moved = false; }
+    try { tick(dt); } finally { if (due) S.trigger = null; }
+    // a blend isn't a Performer call: the fly just starts moving the crossfader
+    if (due && !dj.pending && dj.commit && !S.moved) {
+      S.trigger = { group: 'steer', transition: 'blend' };
+      moveEvent('blend', [p.dir > 0 ? 'B' : 'A', '<b>the fly</b>']);
+      S.trigger = null;
+    }
+  };
+  bus?.addEventListener('message', (e) => {
+    if (e.data?.type === 'sync?') { bus.postMessage({ type: 'sync', moves: S.recentMoves || [] }); postState(); }
+  });
+}
+
+function postState() {
+  if (!bus || !S.mixer) return;
+  const mx = S.mixer, dj = S.dj, on = mx.onAir(), flies = S.hello.flies || 1;
+  let beat = null;
+  if (on.playing && on.track) { const nb = on.nextBeatTime(1); beat = { at: ctxToAbs(nb), spb: 60 / on.bpm, n: Math.round(on.beatAt(nb)) }; }
+  const p = dj.pending, lv = S.levels || {}, ear = (e) => S.bands.filter((b) => b.ear === e).map((b) => +(lv[b.name] || 0).toFixed(3));
+  bus.postMessage({
+    type: 'state', t: absNow(), flies, performer: performer(), onAir: on === mx.decks[0] ? 0 : 1, xf: mx.x,
+    decks: mx.decks.map((d) => ({ name: d.name, track: d.track?.name || null, bpm: d.bpm, playing: d.playing,
+      pos: d.track ? d.position() : 0, dur: d.track ? d.duration : 0, air: mx.airness(d) })),
+    beat, pref: dj.pref, epic: dj.epic, persona: dj.persona.name, arc: dj.arc ? ARCS[dj.arc.key].name : null, auto: dj.auto,
+    sense: { space: dj.sense.space.on, peak: dj.sense.peak.on, mix: S.ctx.currentTime < (dj.mixWindow || 0) },
+    listeners: dj.listeners?.map((l) => Object.fromEntries(Object.entries(l.r).map(([k, r]) => [k, { rank: r.rank ?? 0.5, on: !!r.active }]))) || null,
+    pending: p ? { style: p.style, dir: p.dir, at: ctxToAbs(p.at), group: STYLE_GROUP[p.style] } : null,
+    groups: Object.fromEntries(dj.moves.map((m) => [m.key, +m.level.toFixed(3)])),
+    ears: { L: ear('L'), R: ear('R') }, load: S.stats.load,
+  });
+}
+
 function bindGlobalUI() {
+  $('#btn-viz').onclick = () => window.open('viz.html', 'flybrain-viz', 'popup,width=1440,height=860');
   $('#btn-start').onclick = start;
   $('#xfader').oninput = (e) => { S.mixer.setCrossfader(+e.target.value); S.dj.userHold = 8; };
   $('#auto').onchange = (e) => { S.dj.auto = e.target.checked; log(`fly autopilot ${S.dj.auto ? 'on' : 'off'}`); };

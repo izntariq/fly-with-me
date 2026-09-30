@@ -102,10 +102,12 @@ export class Deck {
     this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 22000; this.lp.Q.value = 0.9;
     this.hp = ctx.createBiquadFilter(); this.hp.type = 'highpass'; this.hp.frequency.value = 10; this.hp.Q.value = 0.9;
     this.tap = ctx.createGain();         // pre-fader cue (what the fly hears in split mode)
+    this.rawTap = ctx.createGain();      // the track itself, before EQ / filter / FX: what listener flies hear
     this.xf = ctx.createGain();
     this.echoSend = ctx.createGain(); this.echoSend.gain.value = 0;
 
     this.input.connect(this.low); this.fxIn.connect(this.low);
+    this.input.connect(this.rawTap);
     this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.lp); this.lp.connect(this.hp);
     this.hp.connect(this.tap); this.tap.connect(this.xf); this.xf.connect(mixer.master);
     this.tap.connect(this.echoSend); this.echoSend.connect(mixer.echoIn);
@@ -183,6 +185,7 @@ export class Deck {
     if (!this.keyNode) return;
     const wasPlaying = this.playing, resumeAt = this.ctx.currentTime + 0.06, resumePos = this.position(resumeAt);
     this.input.disconnect();
+    this.input.connect(this.rawTap);
     if (on) { this.input.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
     else this.input.connect(this.low);
     this.keylock = on;

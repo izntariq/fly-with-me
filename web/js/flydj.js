@@ -50,6 +50,47 @@ const PROFILE = {
 // in a breakdown (low energy) the fly reaches for space instead of chops
 const BREAKDOWN = { escape: 'echo', scratch: 'wind', trans: 'flange' };
 
+// A listener fly's section sense: its trained readout neurons, averaged over both sides (a listener hears one deck in
+// both ears, as in training), z-scored and smoothed. Live levels sit offset from the offline ones, so each section is
+// detected RELATIVE to this fly's own last ~3 minutes (where the current value ranks), with on/off hysteresis:
+//   MIX  on in its top 20% (intros)      SPACE on in its top 10% (breakdowns)      PEAK off in its bottom 25%
+const REL = { MIX: [0.8, 0.7], SPACE: [0.9, 0.8], PEAK: [0.3, 0.25] };   // [on above rank, off below rank]
+
+class ListenerSense {
+  constructor(readout, outputs) {
+    const slotOf = new Map(outputs.map((o, i) => [o.id, i]));
+    this.r = {};
+    this.slot = new Map();
+    for (const [name, spec] of Object.entries(readout || {})) {
+      const ns = spec.neurons.map((n) => ({ slot: slotOf.get(n.id), mu: n.mu, sd: n.sd })).filter((n) => n.slot != null);
+      this.r[name] = { ns, on: spec.on, off: spec.off, tau: spec.tau_s, rate: new Float32Array(ns.length), z: 0, active: false, hist: [] };
+      ns.forEach((n, i) => { if (!this.slot.has(n.slot)) this.slot.set(n.slot, []); this.slot.get(n.slot).push([name, i]); });
+    }
+    this.isDN = outputs.map((o) => o.cls === 'descending');
+    this.dnCount = 0;                                   // descending spikes this frame (how excited the fly is)
+  }
+  update(spikes, dtMs) {
+    const dt = dtMs / 1000, a = Math.exp(-dtMs / 200), cnt = new Map();
+    this.dnCount = 0;
+    for (const [s] of spikes) { if (this.slot.has(s)) cnt.set(s, (cnt.get(s) || 0) + 1); if (this.isDN[s]) this.dnCount++; }
+    const state = {};
+    for (const [name, r] of Object.entries(this.r)) {
+      let z = 0;
+      r.ns.forEach((n, i) => { r.rate[i] = a * r.rate[i] + (1 - a) * (cnt.get(n.slot) || 0) / dt; z += (r.rate[i] - n.mu) / n.sd; });
+      r.z += (z / Math.max(1, r.ns.length) - r.z) * dt / r.tau;
+      // rank of the current value among the last ~3 min (sampled every 0.2 s)
+      if ((this.tick = (this.tick || 0) + 1) % (10 * Object.keys(this.r).length) < Object.keys(this.r).length) { r.hist.push(r.z); if (r.hist.length > 900) r.hist.shift(); }
+      const rank = r.hist.length > 150 ? r.hist.reduce((c, v) => c + (v < r.z), 0) / r.hist.length : 0.5;
+      const [on, off] = REL[name] || [0.9, 0.8];
+      r.rank = rank;
+      r.active = name === 'PEAK' ? (r.active ? rank > off : rank > on) : (r.active ? rank > off : rank > on);
+      state[name] = r.active;
+    }
+    this.state = state;
+    return state;
+  }
+}
+
 export class FlyDJ {
   constructor(mixer, ears, synth, perf, outputs, log) {
     this.mixer = mixer; this.ears = ears; this.synth = synth; this.perf = perf; this.log = log;
@@ -106,6 +147,17 @@ export class FlyDJ {
 
   // trained readout (brains/readout.json): for each section, the specific trained neurons that signal it, with the
   // z-score stats and on/off thresholds picked on the training tracks
+  // chained mode: a listener fly per deck (trained readout) tells the DJ fly where each deck is in its track
+  setListeners(readout, outputs) { this.listeners = [new ListenerSense(readout, outputs), new ListenerSense(readout, outputs)]; }
+  onListeners(outA, outB, dtMs) {
+    const L = this.listeners;
+    if (!L) return;
+    L[0].update(outA, dtMs); L[1].update(outB, dtMs);
+    // track previews are scored by the listener fly of the deck being previewed
+    const a = this.aud, now = this.mixer.ctx.currentTime;
+    if (a && now - a.t0 > 1.2) { a.acc += L[a.deck].dnCount; a.n += dtMs / 1000; }
+  }
+
   setReadout(readout, outputs) {
     const slotOf = new Map(outputs.map((o, i) => [o.id, i]));
     this.readout = {};
@@ -134,7 +186,14 @@ export class FlyDJ {
     const cur = pickF(sp.f);
     const rank = hist.length > 150 ? hist.filter((v) => v < cur).length / hist.length : 0;
     let spaceOn = this.trained && rank > 0.95, peakOn = this.t > 30 && pickF(pk.f) > 1.9 * (pickF(pk.l) + 0.5);
-    if (this.readout?.SPACE) {
+    if (this.listeners?.[0].state) {
+      // chained flies: the on-air deck's own listener fly says where that track is
+      const st = this.listeners[side].state, other = this.listeners[1 - side].state;
+      spaceOn = !!st.SPACE; peakOn = this.t > 30 && !!st.PEAK;
+      if (st.MIX) this.mixWindow = this.mixer.ctx.currentTime + 8 * this.beat();
+      if (st.MIX && !this._mixOn) this.log(`<b>listener fly ${side ? 'B' : 'A'}</b> senses a <b>mixing window</b> (intro / outro) on the on-air deck${other.MIX ? ' — and the other deck is in one too' : ''}`);
+      this._mixOn = !!st.MIX;
+    } else if (this.readout?.SPACE) {
       // trained readout: z-scored rate of the chosen neurons (on-air side in split mode), 4 s smoothing, hysteresis
       const state = {};
       for (const [name, r] of Object.entries(this.readout)) {
@@ -159,7 +218,7 @@ export class FlyDJ {
       this.mixWindow = now + 32 * this.beat();
     }
     if (spaceOn && !sp.on) {
-      this.log('<b>SPACE neurons</b> (trained) sense a <b>breakdown</b>');
+      this.log(this.listeners ? `<b>listener fly ${side ? 'B' : 'A'}</b> senses a <b>breakdown</b> on the on-air deck` : '<b>SPACE neurons</b> (trained) sense a <b>breakdown</b>');
       if (this.auto && this.t > 15 && !this.perf.busy()) this.doMove(this.mixer.onAir().hasStems && Math.random() < 0.3 ? 'drumsout' : (this.frameCounts.at(-1) % 2 ? 'reverb' : 'echo'), '<b>SPACE neurons</b>');
     }
     sp.on = spaceOn; pk.on = peakOn;
@@ -247,7 +306,7 @@ export class FlyDJ {
     }
     const now = this.mixer.ctx.currentTime, beat = this.beat();
     const a = this.aud;
-    if (a && now - a.t0 > 1.2) { a.acc += a.deck === 0 ? L : R; a.n += dt; }
+    if (a && !this.listeners && now - a.t0 > 1.2) { a.acc += a.deck === 0 ? L : R; a.n += dt; }
     this.moves.forEach((m, k) => {
       const hz = counts[k] / dt / Math.max(1, m.slots.length);
       m.fast += (hz - m.fast) * Math.min(1, dt / 0.3);
