@@ -130,6 +130,7 @@ export class FlyDJ {
     this.aud = null;          // headphone audition in progress
     this.offAirSince = [0, 0];
     this.onAirSince = 0;
+    this.minOnAir = 45;       // seconds a track stays on air before the fly may leave it (unless it runs out)
     this.lastAny = -1e9; this.lastBuild = -1e9; this.lastHorn = -1e9;
     this.onArrive = null;     // (deck, {snap, at}) => void — a new track is now the one on air
     this.trained = false;     // a brain trained by flybrain.train: its MIX neurons flag mixing windows
@@ -399,6 +400,8 @@ export class FlyDJ {
         if (intensity > 2.2) P.sample('siren', who);
         break;
       case 'reject': {
+        // too soon to leave this track: the aversion shows as a low-pass dip instead of a spinback cut
+        if (this.onAirSince < this.minOnAir) { P.beatFx('lpf', 4, `${who} (aversion, but staying on this track)`); break; }
         const at = P.spinCut(`${who} (aversion)`);
         if (at) this.afterCut(at);
         break;
@@ -507,11 +510,12 @@ export class FlyDJ {
     if (this.aud) this.tickAudition(now);
     if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud) {
       const onIdx = onAir === A ? 0 : 1, dir = onAir === A ? 1 : -1;
-      const [minOn, maxOn] = this.persona.onAir || [0, Infinity];
+      const minOn = Math.max(this.persona.onAir?.[0] ?? 0, this.minOnAir);
+      const maxOn = Math.max(this.persona.onAir?.[1] ?? Infinity, minOn);
       // trained brain: its MIX neurons (DNb06 · DNge113 · DNge145) learned to fire in intros and outros
       const mixReady = this.trained && now < this.mixWindow;
       const wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn
-        || (mixReady && this.onAirSince > Math.max(20, minOn) && this.ears.habit[onIdx] >= 0.1);
+        || (mixReady && this.onAirSince > minOn && this.ears.habit[onIdx] >= 0.1);
 
       if (wants || endingSoon) {
         const style = endingSoon && !wants ? 'blend' : this.chooseStyle();
@@ -521,6 +525,7 @@ export class FlyDJ {
         let at = onAir.timeOfBeat(phraseBeat - lead);
         if (at < now + 0.1) at = onAir.timeOfBeat(phraseBeat + 16 - lead);
         this.pending = { at, style, dir };
+        this.cueIncoming(mx.offAir(), at, style);
         const why = { drop: 'giant fiber most excited', echo: 'echo neurons most excited', spin: 'aversion neurons most excited', cut: 'rhythm neurons most excited', double: 'whole brain aroused', kill: 'flanger neurons most excited', blend: 'calm' }[style];
         const names = { drop: 'drop-swap', echo: 'echo out', spin: 'spinback cut', cut: 'hard cut', double: 'double drop', kill: '1-bar kill', blend: 'blend' };
         this.log(`fly turns ${dir > 0 ? 'right' : 'left'} (pref ${this.pref.toFixed(2)}) → will <b>${names[style]}</b> into deck ${dir > 0 ? 'B' : 'A'} on the next phrase (${why}${this.persona.key !== 'fly' ? ', ' + this.persona.name + ' style' : ''})`);
@@ -532,7 +537,9 @@ export class FlyDJ {
     if (this.commit && bothPlaying) {
       const speed = 1 / ((this.persona.blendBars || 8) * 4 * beatLen);       // full fader travel over blendBars
       let v = this.commit * speed;
-      if (this.pref * this.commit < -0.35) v = -this.commit * speed;
+      // it may change its mind only early in the blend; past that the new track comes in, no back-and-forth
+      const done = this.commit > 0 ? x : 1 - x;
+      if (this.pref * this.commit < -0.35 && done < 0.3) v = -this.commit * speed;
       const nx = Math.min(1, Math.max(0, x + v * dt));
       mx.setCrossfader(nx);
       this.bassSwap(nx, x);
@@ -550,6 +557,22 @@ export class FlyDJ {
         if (this.picker) this.startAudition(i); else this.onLoadNext?.(i);
       }
     });
+  }
+
+  // Like a DJ cueing the next record: if the incoming deck would arrive too close to its end to stay on air for
+  // minOnAir, jump it back (while it's still off air) by whole 16-beat phrases, which keeps it in phase with the mix.
+  cueIncoming(off, at, style) {
+    if (!off.track || !off.playing) return;
+    const now = this.mixer.ctx.currentTime, beatLen = 60 / (off.bpm || 120);
+    const trans = style === 'blend' ? (this.persona.blendBars || 8) * 4 * beatLen : 8 * beatLen;
+    const need = (at - now) + trans + this.minOnAir + 48 * beatLen;              // wall seconds still to come
+    const left = (off.duration - off.position()) / off.rate;
+    if (left >= need) return;
+    const t = off.nextBarTime(), pos = off.position(t), phrase = 16 * 60 / off.track.bpm;
+    const k = Math.min(Math.ceil((need - left) * off.rate / phrase), Math.floor((pos - off.track.firstBeat) / phrase));
+    if (k <= 0) return;
+    off.jumpTo(t, pos - k * phrase);
+    this.log(`🎧 the fly cues deck ${off.name} back ${k * 4} bars so the next track has room to play`);
   }
 
   // ---------------- track selection: preview candidates in the cue ear, keep the one the brain responds to most

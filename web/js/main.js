@@ -452,6 +452,7 @@ function bindPerformance() {
     b.classList.add('sel'); S.fxBeats = +b.dataset.b;
   });
   $('#epic').oninput = (e) => { S.dj.epic = +e.target.value; };
+  $('#min-on').oninput = (e) => { S.dj.minOnAir = +e.target.value; $('#min-on-val').textContent = `${e.target.value} s`; };
   // "play like" DJ styles
   const sel = $('#persona');
   for (const [k, st] of Object.entries(STYLES)) { const o = document.createElement('option'); o.value = k; o.textContent = st.name; sel.append(o); }
