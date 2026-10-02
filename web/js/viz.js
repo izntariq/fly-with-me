@@ -52,7 +52,7 @@ export class BrainView {
 export class Raster {
   constructor(canvas, outputs) {
     this.c = canvas; this.g = canvas.getContext('2d'); this.n = outputs.length;
-    this.motorStart = outputs.findIndex((o) => o.cls === 'motor');
+    this.motorStart = outputs.findIndex((o) => o.cls !== 'descending');      // motor (and male-CNS leg / wing motor)
     this.g.fillStyle = '#030406'; this.g.fillRect(0, 0, canvas.width, canvas.height);
     this.pending = [];
     this.pxPerSec = canvas.width / 4;

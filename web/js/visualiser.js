@@ -44,6 +44,8 @@ const CLASS = [
   [0.38, 0.58, 1.00, 0.16],   // visual centrifugal
   [1.00, 0.72, 0.30, 0.80],   // motor
   [1.00, 0.40, 0.40, 0.50],   // endocrine
+  [0.40, 0.75, 0.95, 0.16],   // nerve cord (male CNS)
+  [1.00, 0.52, 0.20, 0.80],   // leg / wing motor neurons (male CNS)
 ];
 
 // ---------------- what the moves are called ----------------
@@ -91,7 +93,7 @@ uniform highp sampler2D u_pos;
 uniform mat3 u_rot;
 uniform vec3 u_fly[3];          // centre (NDC) and scale of each fly
 uniform float u_aspect;         // height / width
-uniform vec4 u_cls[11];
+uniform vec4 u_cls[13];
 uniform float u_pixel;          // bitcrush: snap positions to a grid
 uniform vec2 u_wob;             // acid / sing-along: wave (amount, phase)
 uniform vec3 u_slice;           // live chops: (amount, seed, bands)
@@ -148,6 +150,7 @@ const SRC = {
       float age = u_now - a_t;
       if (a_idx < 0.0 || age < 0.0 || age > u_life) { gl_Position = OFF; gl_PointSize = 0.0; return; }
       vec4 p = neuron(int(a_idx));
+      if (p.w < 0.0) { gl_Position = OFF; gl_PointSize = 0.0; return; }
       int f = int(a_f);
       float s; vec2 xy = place(p.xyz, f, s);
       xy.y += u_rise * age;
@@ -165,8 +168,10 @@ const SRC = {
       float k = (u_now - a_t - lag) / u_travel;
       if (a_idx < 0.0 || k < 0.0 || k > 1.0) { gl_Position = OFF; gl_PointSize = 0.0; return; }
       int side = int(a_f);
+      vec4 src = neuron(int(a_idx));
+      if (src.w < 0.0) { gl_Position = OFF; gl_PointSize = 0.0; return; }
       float s0, s1;
-      vec2 A = place(neuron(int(a_idx)).xyz, side, s0);
+      vec2 A = place(src.xyz, side, s0);
       vec2 B = place(u_ear[side], 2, s1);
       vec2 d = B - A, C = (A + B) * 0.5 + vec2(-d.y, d.x) * (side == 0 ? 0.28 : -0.28);
       float t = k * k * (3.0 - 2.0 * k);
@@ -183,7 +188,9 @@ const SRC = {
       float age = u_now - a_t, k = age / u_hlife;
       if (a_idx < 0.0 || k < 0.0 || k > 1.0) { gl_Position = OFF; gl_PointSize = 0.0; return; }
       int f = int(a_f);
-      float s; vec2 xy = place(neuron(int(a_idx)).xyz, f, s);
+      vec4 p = neuron(int(a_idx));
+      if (p.w < 0.0) { gl_Position = OFF; gl_PointSize = 0.0; return; }
+      float s; vec2 xy = place(p.xyz, f, s);
       gl_Position = vec4(xy, 0.0, 1.0);
       gl_PointSize = u_spx[f] * s * (2.4 + 3.0 * k);
       v_c = a_c * (1.0 - k) * (0.65 + 0.35 * cos(age * 16.0));
@@ -267,6 +274,9 @@ function loadPositions(buf) {
     pos[4 * i + 2] = -(q[4 * i + 2] - c[2]) / half;
     pos[4 * i + 3] = q[4 * i + 3];
   }
+  // how far the shape reaches from its centre (the FlyWire brain is wide, the whole male CNS tall)
+  V.ext = { x: 0, y: 0 };
+  for (let i = 0; i < n; i++) if (pos[4 * i + 3] >= 0) { V.ext.x = Math.max(V.ext.x, Math.abs(pos[4 * i])); V.ext.y = Math.max(V.ext.y, Math.abs(pos[4 * i + 1])); }
   posTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, posTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -295,7 +305,7 @@ function fresh(t) {
   return { now: t, rotSpeed: 1, yaw: 0, pitch: 0, zoom: 1, dx: 0, dy: 0, focus: 0, shake: 0, gate: 1,
     bright: 1, sat: 1, hue: 0, tint: [0, 0, 0], tintK: 0, invert: 0, cloud: 1, size: 1, life: 1, rise: 0,
     echo: 0, echoDelay: 0.25, echoScale: 0.06, echoK: 0, pixel: 0, wob: 0, wobPh: 0, slice: 0, sliceSeed: 0,
-    wash: [0, 0, 0], beat: 1, cls: new Array(11).fill(1), listen: null, travel: 1 };
+    wash: [0, 0, 0], beat: 1, cls: new Array(CLASS.length).fill(1), listen: null, travel: 1 };
 }
 const mixTint = (X, c, k) => { if (k <= 0) return; const w = X.tintK + k; X.tint = X.tint.map((v, i) => (v * X.tintK + c[i] * k) / w); X.tintK = Math.min(1, w); };
 const addWash = (X, c, k) => { X.wash = X.wash.map((v, i) => v + c[i] * k); };
@@ -336,10 +346,10 @@ const LOOK = {
   mashup(X, e, t, k, B) { mixTint(X, hex(DECK[((B.n % 2) + 2) % 2]), 0.28 * hump(k * 8)); X.listen = [1, 1]; },
   layer(X, e) { X.echo = Math.max(X.echo, 2); X.echoDelay = 4 * e.spb; X.echoScale = 0.1; X.echoK = Math.max(X.echoK, 0.6); },
   drumsout(X, e, t, k) { const end = k > 0.94; X.beat = 0; X.size *= end ? 2 : 0.7; X.bright *= end ? 1.6 : 0.5; },
-  strip(X, e, t, k, B) { X.sat *= 0.08; X.gate *= B.phase < 0.25 ? 1 : 0.35; X.cls = X.cls.map((g, i) => g * (i === 3 || i === 9 ? 1.4 : 0.45)); },
+  strip(X, e, t, k, B) { X.sat *= 0.08; X.gate *= B.phase < 0.25 ? 1 : 0.35; X.cls = X.cls.map((g, i) => g * (i === 3 || i === 9 || i === 12 ? 1.4 : 0.45)); },
   tease(X, e, t, k) { const a = hump(Math.min(1, k * 3)) * (k < 0.9 ? 1 : 0); X.dy += 60 * a; X.zoom *= 1 - 0.08 * a; X.bright *= 1 - 0.6 * a; },
   pump(X, e, t, k, B) { const duck = Math.exp(-B.phase * 4) * hump(k * 6); X.zoom *= 1 - 0.06 * duck; X.bright *= 1 - 0.5 * duck; },
-  singalong(X, e, t, k) { const a = hump(k * 6); X.cls = X.cls.map((g, i) => g * (i === 9 || i === 6 ? 1 + 0.8 * a : 1 - 0.7 * a)); X.wob = Math.max(X.wob, 0.02 * a); X.wobPh = t * 2; mixTint(X, [1, 0.72, 0.3], 0.2 * a); },
+  singalong(X, e, t, k) { const a = hump(k * 6); X.cls = X.cls.map((g, i) => g * (i === 9 || i === 12 || i === 6 ? 1 + 0.8 * a : 1 - 0.7 * a)); X.wob = Math.max(X.wob, 0.02 * a); X.wobPh = t * 2; mixTint(X, [1, 0.72, 0.3], 0.2 * a); },
   fill(X, e, t, k, B) { X.gate *= B.sub(4) < 0.5 ? 1 : 0.1; X.zoom *= 1 + 0.08 * k; },
   acid(X, e, t, k) { const a = hump(k * 6); X.wob = Math.max(X.wob, 0.045 * a); X.wobPh = t * 7; mixTint(X, [0.55, 1, 0.2], 0.35 * a); X.hue += 0.5 * a * Math.sin(t * 3); },
   blend(X, e, t, k) { const inc = e.inc; X.listen = [0, 1].map((i) => (i === inc ? 0.6 + 0.4 * k : 1 - 0.4 * k)); mixTint(X, hex(DECK[inc]), 0.14 * hump(k)); },
@@ -435,7 +445,7 @@ function grade(X) {
   const m = [c + (1 - c) * k, k * (1 - c) - r3 * s, k * (1 - c) + r3 * s,
              k * (1 - c) + r3 * s, c + (1 - c) * k, k * (1 - c) - r3 * s,
              k * (1 - c) - r3 * s, k * (1 - c) + r3 * s, c + (1 - c) * k];
-  const out = new Float32Array(44);
+  const out = new Float32Array(CLASS.length * 4);
   CLASS.forEach(([r, g, b, a], i) => {
     let v = [m[0] * r + m[1] * g + m[2] * b, m[3] * r + m[4] * g + m[5] * b, m[6] * r + m[7] * g + m[8] * b];
     const l = 0.3 * v[0] + 0.59 * v[1] + 0.11 * v[2];
@@ -451,7 +461,18 @@ function layout(X) {
   const W = innerWidth, H = innerHeight, narrow = W < 640;
   const side = V.panel && !narrow ? 332 : 0, cw = W - side, ch = narrow && V.panel ? H * 0.55 : H;
   let L;
-  if (V.flies >= 3) {
+  const ex = V.ext || { x: 1, y: 0.5 }, tall = ex.y > 0.8 * ex.x;
+  if (tall) {
+    // a whole CNS (brain on top, nerve cord below): the flies stand side by side, the DJ fly in the middle
+    const fit = (wFrac, hFrac) => Math.min(hFrac * ch / (ex.y * H), wFrac * cw / (ex.x * H));
+    if (V.flies >= 3) {
+      const s = fit(0.32, 0.72), sl = s * 0.62;
+      L = [{ x: cw * 0.16, y: ch * 0.54, s: sl }, { x: cw * 0.84, y: ch * 0.54, s: sl }, { x: cw * 0.5, y: ch * 0.49, s }];
+    } else if (V.flies === 2) {
+      const s = fit(0.42, 0.78);
+      L = [{ x: cw * 0.27, y: ch * 0.52, s }, { x: cw * 0.73, y: ch * 0.52, s }];
+    } else L = [{ x: cw * 0.5, y: ch * 0.5, s: fit(0.8, 0.84) }];
+  } else if (V.flies >= 3) {
     const s = Math.min(0.62 * cw / H, 1.25 * ch / H, 1.0), sl = s * 0.45;
     L = [{ x: cw * 0.25, y: ch * 0.25, s: sl }, { x: cw * 0.75, y: ch * 0.25, s: sl }, { x: cw * 0.5, y: ch * 0.65, s }];
   } else if (V.flies === 2) {
@@ -706,7 +727,9 @@ function drawHUD(t, dt, dpr, B, X, listen) {
   g.textAlign = 'center'; g.textBaseline = 'top';
   g.shadowColor = 'rgba(0,0,0,.95)'; g.shadowBlur = 6;
   const text = (str, x, y, col, size = 11, weight = 600) => { g.font = `${weight} ${size}px ui-monospace, "SF Mono", Menlo, monospace`; g.fillStyle = col; g.fillText(str, x, y); };
-  const under = (L) => L.y + 0.3 * L.s * H + 8;
+  const tallShape = V.ext && V.ext.y > 0.8 * V.ext.x;
+  const hy = (L) => (0.5 * (V.ext?.y ?? 0.5) + (tallShape ? 0.13 : 0.06)) * L.s * H;     // half the shape's height on screen
+  const under = (L) => L.y + hy(L) + 8;
   const pf = V.L[Math.min(V.performer, V.L.length - 1)];
 
   // the move's name, big and fading, the moment it plays
@@ -716,7 +739,7 @@ function drawHUD(t, dt, dpr, B, X, listen) {
     const k = (t - m.t0) / 1.6;
     if (k < 0) continue;
     g.globalAlpha = 0.5 * (1 - k) ** 1.5;
-    text(m.text.toUpperCase(), pf.x, pf.y - 0.34 * pf.s * H - 30 - 16 * k, m.col, 34 + 10 * (1 - k), 800);
+    text(m.text.toUpperCase(), pf.x, pf.y - hy(pf) - 30 - 16 * k, m.col, 34 + 10 * (1 - k), 800);
   }
   g.globalAlpha = 1; g.shadowBlur = 6;
 
@@ -724,7 +747,7 @@ function drawHUD(t, dt, dpr, B, X, listen) {
     const y = under(L), deck = s?.decks?.[k];
     if (V.flies === 3 && k < 2) {
       // above the brain: its stream into the DJ fly leaves from underneath
-      const y0 = Math.max(8, L.y - 0.3 * L.s * H - 54);
+      const y0 = Math.max(8, L.y - hy(L) - 54);
       g.globalAlpha = 0.5 + 0.5 * listen[k];
       text(`LISTENER FLY ${'AB'[k]}${live && s.onAir === k ? ' · ON AIR' : ''}`, L.x, y0, DECK[k], 11, 700);
       text(`hears deck ${'AB'[k]}${deck?.track ? ' · ' + clip(deck.track, 34) : ''}`, L.x, y0 + 15, '#8a93a8', 10.5, 500);
@@ -810,13 +833,17 @@ function meter(g, x, y, name, v, on, col) {
   g.fillStyle = on ? col : '#59627a'; g.fillRect(x, y + 12, 58 * Math.max(0, Math.min(1, v)), 3);
   g.textAlign = 'center';
 }
-// a listener fly's 12 ear bands as short bars around the lower edge of its brain (low bands left, high right)
+// a listener fly's ear bands as short bars (low bands left, high right): around the lower edge of a wide brain,
+// or in an arc over the head of a tall CNS (its nerve cord hangs below)
 function spectrum(g, L, bands, col, env) {
-  const H = innerHeight, rx = 0.5 * L.s * H * 1.05, ry = 0.3 * L.s * H * 0.95, n = bands.length;
+  const H = innerHeight, ex = V.ext || { x: 1, y: 0.5 }, tall = ex.y > 0.8 * ex.x, n = bands.length;
+  const rx = ex.x * 0.5 * L.s * H * 1.05;
+  const ry = tall ? 0.16 * ex.y * L.s * H : (0.5 * ex.y + 0.06) * L.s * H * 0.95;
+  const cy = tall ? L.y - 0.36 * ex.y * L.s * H : L.y;
   g.save(); g.shadowBlur = 0; g.strokeStyle = col; g.lineWidth = 3; g.lineCap = 'round';
   for (let i = 0; i < n; i++) {
-    const a = Math.PI * (0.92 - 0.84 * i / (n - 1)), v = Math.min(1, bands[i]);
-    const x = L.x + Math.cos(a) * rx, y = L.y + Math.sin(a) * ry, len = 4 + 22 * v;
+    const a = tall ? -Math.PI * (0.92 - 0.84 * i / (n - 1)) : Math.PI * (0.92 - 0.84 * i / (n - 1)), v = Math.min(1, bands[i]);
+    const x = L.x + Math.cos(a) * rx, y = cy + Math.sin(a) * ry, len = 4 + 22 * v;
     g.globalAlpha = (0.25 + 0.6 * v + 0.15 * env) * g.globalAlpha;
     g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len * 0.6); g.stroke();
     g.globalAlpha = 1;

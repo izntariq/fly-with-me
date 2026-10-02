@@ -152,6 +152,24 @@ tempo* on, arousal pushes the BPM up by as much as 6%. **Epicness** scales how o
 The whole brain view is a frontal projection of every neuron: blue = sensory inputs, magenta = outputs, orange =
 everything in between. The raster shows all 1,409 output neurons over the last 4 s.
 
+## The whole CNS: male brain + nerve cord
+
+```bash
+./run.sh --connectome malecns      # downloads ~1.1 GB on first use
+```
+
+This swaps in the male central nervous system connectome (Janelia male-cns v1.0, 2026, CC-BY 4.0): 165,122 neurons
+and 25.6M connections across the brain, optic lobes and ventral nerve cord. The descending neurons now reach the
+fly's real leg, wing and haltere motor neurons (708 of them), and those motor neurons join the outputs.
+
+It runs the same model. Signs come from each neuron's predicted transmitter (GABA and glutamate inhibit), and synapse
+counts are scaled by 0.52 to match FlyWire's input per neuron. On the paper's sugar test both connectomes give
+263k spikes/s and about 10.2k active neurons, and the male CNS fires the feeding motor neurons (MN9). Cell types share
+FlyWire's names, so the ears, the DJ moves and the listener taps carry over.
+
+The brain runs untrained: the learned synapses and the section readout exist only for FlyWire. It costs about 40% more
+GPU time than FlyWire (server load 0.44 vs 0.31 for three flies). See `flybrain/malecns.py`.
+
 ## Visualiser
 
 **🧠 Visualiser** (top right of the app) opens `viz.html` in its own window, so you can put it on a second screen. It
@@ -178,6 +196,7 @@ Brain activity comes straight from the brain server. The moves, decks and beat c
 ```
 flybrain/brain.py     Numba LIF simulator (Shiu et al. model)
 flybrain/mapping.py   sensory inputs / DN+MN outputs from FlyWire annotations
+flybrain/malecns.py   the whole male CNS connectome (brain + nerve cord) as an alternative to FlyWire
 flybrain/gpu.py       the flies on the GPU (Apple silicon, MLX Metal kernels), all stepped together
 flybrain/server.py    aiohttp server: runs the brain in real time, streams spikes over WebSocket
 web/js/main.js        wiring: connection, crate, control loop, UI, keyboard, tempo, visualiser feed

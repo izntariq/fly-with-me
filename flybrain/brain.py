@@ -52,8 +52,17 @@ class Params:
     f_poi: float = 250.0    # Poisson kick = w_syn * f_poi
 
 
+# which connectome: "flywire" (FlyWire v783 brain, the Shiu et al. model; default) or "malecns" (the whole male CNS,
+# brain + nerve cord: flybrain/malecns.py). Set by the server's --connectome.
+def connectome_name() -> str:
+    return os.environ.get("FLYBRAIN_CONNECTOME", "flywire")
+
+
 def load_connectome():
-    """Return (flywire_ids, indptr, indices, weights_in_synapses) as CSR by presynaptic index."""
+    """Return (neuron ids, indptr, indices, signed weights in synapses) as CSR by presynaptic index."""
+    if connectome_name() == "malecns":
+        from .malecns import load_connectome as load_malecns
+        return load_malecns()
     if CACHE.exists():
         z = np.load(CACHE)
         return z["ids"], z["indptr"], z["indices"], z["weights"]

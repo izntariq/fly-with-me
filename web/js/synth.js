@@ -23,7 +23,7 @@ export class FlySynth {
     }
     this.outputs = outputs;
     this.pending = new Float32Array(outputs.length);  // spikes accumulated since last grid step
-    this.voiceInfo = outputs.map((o) => ({ h: hash(o.type), right: o.side === 'right', motor: o.cls === 'motor' }));
+    this.voiceInfo = outputs.map((o) => ({ h: hash(o.type), right: o.side === 'right', motor: o.cls === 'motor' || o.cls === 'leg_wing_motor' }));
     this.root = 45; this.scale = SCALES.minpent;
     this.quantize = true;
     this.midi = null;

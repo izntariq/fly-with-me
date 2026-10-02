@@ -110,7 +110,9 @@ class FlyServer:
         # a trained brain (python -m flybrain.train) is used when present, unless --brain naive
         self.trained = None
         trained_file = Path(__file__).resolve().parent.parent / "brains" / "trained_brain.npz"
-        if brain_mode == "trained" or (brain_mode == "auto" and trained_file.exists()):
+        # the trained synapses are FlyWire's; another connectome (--connectome malecns) runs untouched
+        self.connectome = os.environ.get("FLYBRAIN_CONNECTOME", "flywire")
+        if self.connectome == "flywire" and (brain_mode == "trained" or (brain_mode == "auto" and trained_file.exists())):
             self.trained = self.brain.load_trained(trained_file)
             ro = trained_file.parent / "readout.json"      # which trained neurons signal which section (flybrain/readout)
             if ro.exists():
@@ -176,6 +178,7 @@ class FlyServer:
             "type": "hello",
             "trained": self.trained,
             "flies": len(self.brains),
+            "connectome": self.connectome,
             "dj_taps": [t for t, _ in self.taps] if len(self.brains) == 3 else None,
             "dj_tap_types": LISTENER_TAPS[:len(self.taps)] if len(self.brains) == 3 else None,
             "n_neurons": self.brain.n,
@@ -377,7 +380,12 @@ def main():
     ap.add_argument("--cpu", action="store_true", help="don't use the GPU even if MLX is available")
     ap.add_argument("--brain", choices=["auto", "trained", "naive"], default="auto",
                     help="auto: use brains/trained_brain.npz if it exists; naive: the untouched connectome")
+    ap.add_argument("--connectome", choices=["flywire", "malecns"], default=None,
+                    help="flywire: the FlyWire v783 brain (default); malecns: the whole male CNS, brain + nerve cord "
+                         "(Janelia male-cns v1.0, downloaded on first use, ~1.1 GB)")
     args = ap.parse_args()
+    if args.connectome:
+        os.environ["FLYBRAIN_CONNECTOME"] = args.connectome
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     server = FlyServer(args.brain, args.flies, parallel=not args.serial, gpu=False if args.cpu else None)
     print(f"\n  Fly brain DJ -> http://{args.host}:{args.port}\n")
