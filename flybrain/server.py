@@ -118,6 +118,9 @@ class FlyServer:
             if ro.exists():
                 self.trained["readout"] = json.loads(ro.read_text())
             log.info("trained brain: %d learned synapses (epoch %d)", self.trained["synapses"], self.trained["epoch"])
+        # section sense v2 for the listener flies (tools/train_sections.py --export), for this brain
+        sec = Path(__file__).resolve().parent.parent / "brains" / f"sections_{'trained' if self.trained else 'naive'}.json"
+        self.sections = json.loads(sec.read_text()) if self.connectome == "flywire" and sec.exists() else None
         ann = load_annotations()
         self.inputs = build_inputs(ann, self.brain.id2idx)
         self.out_idx, self.out_meta = build_outputs(ann, self.brain.ids)
@@ -179,6 +182,7 @@ class FlyServer:
             "trained": self.trained,
             "flies": len(self.brains),
             "connectome": self.connectome,
+            "sections": self.sections,
             "dj_taps": [t for t, _ in self.taps] if len(self.brains) == 3 else None,
             "dj_tap_types": LISTENER_TAPS[:len(self.taps)] if len(self.brains) == 3 else None,
             "n_neurons": self.brain.n,

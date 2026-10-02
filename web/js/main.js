@@ -198,7 +198,7 @@ async function addFiles(files) {
       const t = await trackFromFile(S.ctx, f);
       S.crate.splice(S.crateNext % (S.crate.length + 1), 0, t);   // user tracks play next
       log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}`);
-      separate(t);
+      if (!window.flyNoStems) separate(t);          // tests can skip stem separation (CPU heavy)
       renderCrate();
     } catch (e) { log(`could not decode "${f.name}": ${e.message}`); }
   }
@@ -224,6 +224,10 @@ async function start() {
     else S.dj.setReadout(S.hello.trained.readout, S.hello.outputs);
   }
   if ((S.hello.flies || 1) >= 2) S.ears.listenRaw();
+  if ((S.hello.flies || 1) >= 2 && S.hello.sections) {
+    S.dj.setSections(S.hello.sections, S.hello.outputs);
+    log(`section sense v2: the listener flies' ${S.hello.sections.groups.length} output-neuron types → intro / main / breakdown / outro, on each deck's bar grid`);
+  }
   if ((S.hello.flies || 1) === 3) log('🪰🪰🪰 <b>three flies</b>: a listener fly on each deck (each hears its deck in both ears) feeds a <b>DJ fly</b> — its left ear hears listener A, its right ear listener B');
   else if ((S.hello.flies || 1) === 2) log('🪰🪰 <b>two flies</b>: one listener per deck; the on-air deck\'s fly performs');
   if (S.hello.trained) log(`this fly's brain is <b>trained</b>: ${S.hello.trained.synapses.toLocaleString()} synapses learned when a DJ builds, leaves space, mixes and peaks`);
@@ -758,6 +762,7 @@ function toggleRecord() {
 }
 
 window.flyDJ = S;
+S.api = { addFiles, loadTrack, loadNext };      // for tools/djbench.mjs
 window.renderCrate = () => renderCrate();   // handy for poking at it from the devtools console
 bindGlobalUI();
 connect();

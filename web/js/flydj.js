@@ -37,6 +37,7 @@ export const MOVES = [
 import { camelotDistance, camelotName } from './analysis.js';
 import { STYLES } from './djstyles.js';
 import { ARCS, energyAt, trackIntensity } from './setplan.js';
+import { SectionSense } from './sections.js';
 
 // How the fly adapts its playing to the style of what's on air (detected for your own tracks).
 //   cool: cooldown multiplier   build: how keen on build-ups   remap: swap a move for a better-fitting one
@@ -150,7 +151,11 @@ export class FlyDJ {
   // z-score stats and on/off thresholds picked on the training tracks
   // chained mode: a listener fly per deck (trained readout) tells the DJ fly where each deck is in its track
   setListeners(readout, outputs) { this.listeners = [new ListenerSense(readout, outputs), new ListenerSense(readout, outputs)]; }
+  // section sense v2 (sections.js): a classifier + arrangement prior per listener fly, on its deck's bar grid
+  setSections(spec, outputs) { this.sections = this.mixer.decks.map((d) => new SectionSense(spec, outputs, d)); this.useSections = true; }
+  sectionsOn() { return this.sections && this.useSections !== false ? this.sections : null; }
   onListeners(outA, outB, dtMs) {
+    this.sections?.forEach((s, i) => s.update(i ? outB : outA, dtMs));
     const L = this.listeners;
     if (!L) return;
     L[0].update(outA, dtMs); L[1].update(outB, dtMs);
@@ -187,9 +192,10 @@ export class FlyDJ {
     const cur = pickF(sp.f);
     const rank = hist.length > 150 ? hist.filter((v) => v < cur).length / hist.length : 0;
     let spaceOn = this.trained && rank > 0.95, peakOn = this.t > 30 && pickF(pk.f) > 1.9 * (pickF(pk.l) + 0.5);
-    if (this.listeners?.[0].state) {
+    const LS = this.sectionsOn() || this.listeners;
+    if (LS?.[0].state) {
       // chained flies: the on-air deck's own listener fly says where that track is
-      const st = this.listeners[side].state, other = this.listeners[1 - side].state;
+      const st = LS[side].state, other = LS[1 - side].state;
       spaceOn = !!st.SPACE; peakOn = this.t > 30 && !!st.PEAK;
       if (st.MIX) this.mixWindow = this.mixer.ctx.currentTime + 8 * this.beat();
       if (st.MIX && !this._mixOn) this.log(`<b>listener fly ${side ? 'B' : 'A'}</b> senses a <b>mixing window</b> (intro / outro) on the on-air deck${other.MIX ? ' — and the other deck is in one too' : ''}`);
@@ -479,7 +485,10 @@ export class FlyDJ {
 
     this.tickArc(now);
     const onAir = mx.onAir();
-    this.onAirSince = mx.airness(onAir) > 0.99 ? this.onAirSince + dt : 0;
+    // time this track has been fully on air; a cut swaps decks instantly, so a new deck or track restarts it
+    const fresh = onAir !== this._onAirDeck || onAir.track !== this._onAirTrack;
+    this._onAirDeck = onAir; this._onAirTrack = onAir.track;
+    this.onAirSince = mx.airness(onAir) > 0.99 && !fresh ? this.onAirSince + dt : 0;
     if (this.userHold > 0) { this.userHold -= dt; return; }
     if (now < mx.lockUntil) return;
     const bothPlaying = A.playing && B.playing;
@@ -514,8 +523,15 @@ export class FlyDJ {
       const maxOn = Math.max(this.persona.onAir?.[1] ?? Infinity, minOn);
       // trained brain: its MIX neurons (DNb06 · DNge113 · DNge145) learned to fire in intros and outros
       const mixReady = this.trained && now < this.mixWindow;
-      const wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn
+      let wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn
         || (mixReady && this.onAirSince > minOn && this.ears.habit[onIdx] >= 0.1);
+      const sec = this.sectionsOn()?.[onIdx].state;
+      if (sec) {
+        // section sense v2: mix out of a sensed outro; a fly that wants to leave waits for an outro or breakdown,
+        // never mid-main section (unless it has been on air for 3 minutes)
+        const sure = sec.conf > 0.55, outro = sure && sec.section === 'outro', calm = outro || (sure && sec.section === 'break');
+        wants = (outro && this.onAirSince >= minOn) || (wants && calm) || this.onAirSince > Math.max(180, minOn);
+      }
 
       if (wants || endingSoon) {
         const style = endingSoon && !wants ? 'blend' : this.chooseStyle();
@@ -567,12 +583,15 @@ export class FlyDJ {
     const trans = style === 'blend' ? (this.persona.blendBars || 8) * 4 * beatLen : 8 * beatLen;
     const need = (at - now) + trans + this.minOnAir + 48 * beatLen;              // wall seconds still to come
     const left = (off.duration - off.position()) / off.rate;
-    if (left >= need) return;
+    // with section sense, blends and cuts bring the new track in from its intro, like a DJ cueing the first beat
+    const toIntro = this.sectionsOn() && style !== 'drop' && style !== 'double';
+    if (left >= need && !toIntro) return;
     const t = off.nextBarTime(), pos = off.position(t), phrase = 16 * 60 / off.track.bpm;
-    const k = Math.min(Math.ceil((need - left) * off.rate / phrase), Math.floor((pos - off.track.firstBeat) / phrase));
+    const most = Math.floor((pos - off.track.firstBeat) / phrase);
+    const k = toIntro ? most : Math.min(Math.ceil((need - left) * off.rate / phrase), most);
     if (k <= 0) return;
     off.jumpTo(t, pos - k * phrase);
-    this.log(`🎧 the fly cues deck ${off.name} back ${k * 4} bars so the next track has room to play`);
+    this.log(toIntro ? `🎧 the fly cues deck ${off.name} to its intro (back ${k * 4} bars)` : `🎧 the fly cues deck ${off.name} back ${k * 4} bars so the next track has room to play`);
   }
 
   // ---------------- track selection: preview candidates in the cue ear, keep the one the brain responds to most

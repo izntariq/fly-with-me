@@ -184,3 +184,119 @@ Ordered by expected impact for the effort. Each step says how to measure it.
    cheapest change and uses signal that is already there.
 2. Make transitions wait for a sensed intro or outro (item 4). That is the most audible DJ skill the fly lacks.
 3. Build the benchmark (item 13) before any retraining, so improvements can be told from run-to-run noise.
+
+## Results: section sense v2 (2 October)
+
+Items 1–4 and 13 are built:
+- `flybrain/sections.py` and `web/js/sections.js`: the classifier, bar grid and arrangement prior
+- `flydj.js`: mixing gated on the sensed section; the incoming track cued to its intro
+- `tools/djbench.mjs`: the benchmark
+
+The model was trained on **131 of the user's own real tracks** (pop, house, techno, indie). The fly listened to every
+track on the GPU (`tools/record_real.py`), and reference sections came from each track's energy profile
+(`label_track`).
+
+**Offline**, on 37 held-out tracks (4,419 bars):
+
+| | Accuracy | Macro-F1 | Breakdown P / R | Outro P / R |
+|---|---|---|---|---|
+| Always "main" | 0.66 | 0.20 | – | – |
+| Song order + position only (no fly) | 0.69 | 0.31 | – | – |
+| The fly's neurons only | 0.49 | 0.41 | 0.34 / 0.53 | 0.27 / 0.37 |
+| **Fly + song order (v2)** | **0.72** | **0.54** | 0.49 / 0.47 | 0.87 / 0.28 |
+
+**Live**: the full app, headless, 3 runs × 8 min per sense on the held-out tracks, mean ± 95% CI.
+
+| | v1 (rank detector) | **v2** |
+|---|---|---|
+| Mixing-window sense, precision | 0.14 ± 0.04 | **0.77 ± 0.29** |
+| Mixing-window sense, recall | **0.37 ± 0.30** | 0.05 ± 0.02 |
+| Breakdown sense, precision / recall | 0.32 / 0.15 | 0.32 / **0.31** |
+| Main sense, precision / recall | 0.74 / 0.94 | 0.76 / 0.89 |
+| Transitions started in an intro / outro | 0.04 ± 0.08 | **0.21 ± 0.12** |
+| Transitions started mid-main | 0.71 ± 0.22 | 0.74 ± 0.10 |
+| Echo / space moves in a breakdown | 0.27 ± 0.04 | 0.20 ± 0.08 |
+| Time on air per track | 52 s | **74 s** |
+| Moves in 8 min | 58 | 26 |
+| Load | 0.78 | 0.72 |
+
+**What it means:**
+- v2 is much more precise about mixing windows: when it says intro or outro, it's right about 77% of the time,
+  against 14%. It finds twice as many breakdowns, and the fly is steadier and calmer.
+- It mixes from an intro or outro 5× as often (21% against 4%), but most transitions still start mid-main. The gate
+  leans on the breakdown sense (precision about 0.32) and on the 3-minute cap, because live the outro is rarely
+  called (recall 0.05).
+- Next: calibrate the decision thresholds per section on the training tracks instead of a flat 0.55 posterior, which
+  is too strict for outros. Open the mixing gate in the last third of a track when the sense isn't "main", which is
+  how a DJ reads the deck's remaining time. Then re-run the benchmark.
+
+Two bugs found by the benchmark and fixed:
+- a cut didn't restart the time-on-air clock, so the fly could cut repeatedly
+- a deck cued back to its intro kept its old section state
+
+## Audit 2: section sense v2 and the benchmark (2 October)
+
+**1. The reference labels favour the app's own analysis.**
+- Sections are labelled from each track's energy profile. A 2-feature detector on the app's own per-bar energy, with
+  the same model and prior, beats the fly's neurons on the held-out tracks: macro-F1 **0.62 against 0.54**, outro
+  recall 0.45 against 0.24.
+- Fly + energy combined scores 0.57 overall, and best on breakdowns (P 0.54 / R 0.59, against 0.49 / 0.47 for the
+  fly alone).
+- As measured, the fly adds some skill on breakdowns and is otherwise a noisier sensor of what the app already
+  computes. A fair test needs labels that aren't defined by energy: hand-marked sections on 20–30 of the user's
+  tracks.
+
+**2. The mixing gate leaks.**
+- An instrumented 10-minute run gave 4 mixes, 3 of them mid-main:
+  - 2 came from false breakdown senses (posterior 0.56 and 0.69; live breakdown precision is about 0.32), and 0.55
+    is too low a bar to act on
+  - 1 came with the sense at main / 0.99, the track not ending and under 3 minutes on air. None of the gate's
+    conditions explain it, so the decision code needs a reason trace
+- Only 1 of the 4 was a correct breakdown mix.
+
+**3. The live mixing-window recall (0.05) is mostly a measurement artefact.**
+- The on-air deck's intro plays mostly during the blend, before that deck counts as on air.
+- After cue-to-intro the sense restarts, with 4 warm-up bars at z = 0.
+- The fly mixes out before outros come.
+- The benchmark should score the sense on both decks (each listener senses its deck all the time), not just the
+  on-air one.
+
+**4. A lower cutoff won't rescue outros.** Offline, the outro posterior rarely rises: dropping the cutoff from 0.55 to
+0.2 only lifts recall from 0.24 to 0.32 (precision stays 0.97). Intros improve more (0.23 → 0.42 at precision 0.78).
+Breakdowns trade precision for recall almost one for one.
+
+**5. The benchmark is too thin to diagnose with.**
+- 5–8 transitions per 8-minute run, so the confidence intervals are wide.
+- Saved results keep only summaries (no raw events).
+- Transitions are labelled when scheduled, not when they happen.
+- The "space moves in breakdowns" metric mixes sense-driven moves with untrained echo-group bursts.
+- Moves halved with v2 (58 → 26), and nothing recorded says which.
+
+**6. Still open from the first audit:**
+- the DJ fly still carries synapses trained for music, though it hears the listener taps
+- no naive-brain version of v2 exists to show whether the synapse training helps at all
+- the offline score is one fixed 25% split, with no cross-validation or confidence interval
+
+**Checked and fine:**
+- train / live feature definitions match: rates pooled by type, log, causal z with a 4-bar warm-up, 4-bar context,
+  and the same HMM
+- loop rolls and backspins play on a separate source and don't move the playhead, so they don't reset the sense
+
+### Fixes, in order
+1. **Gate:**
+   - mix from a breakdown only at posterior ≥ 0.85, held for 2 bars, in the second half of the track
+   - keep outro-gated mixing
+   - log a reason with every scheduled transition
+2. **Fuse the app's energy analysis into the sense** (fly + energy features, energy properly weighted). The fly's
+   neurons then add where they help, at breakdowns.
+3. **Fair ground truth:** hand-mark sections on 20–30 tracks, and rerun both the offline evaluation and the
+   benchmark against them.
+4. **Benchmark v2:**
+   - save raw events
+   - label transitions when they happen
+   - score both decks' sense
+   - separate sense-driven moves from burst moves
+   - 5 runs
+   - 5-fold cross-validation offline
+5. **Record a naive listener and train v2 on it**, to answer whether the trained synapses help. Load the untouched
+   connectome into the DJ fly.
