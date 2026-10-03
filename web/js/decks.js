@@ -90,7 +90,8 @@ export class Deck {
     this.rate = 1; this.anchorCtx = 0; this.anchorPos = 0;
     this.eqVals = { low: 0, mid: 0, high: 0 }; this.filterVal = 0;
 
-    this.input = ctx.createGain();       // main source goes here (slip-muted during FX)
+    this.input = ctx.createGain();       // main source goes here
+    this.slip = ctx.createGain();        // ...then this, which FX mute while the track keeps running (slip mode)
     // stems: drums and music play as two synced sources, each with its own mute
     this.stemGain = { drums: ctx.createGain(), music: ctx.createGain() };
     this.stemGain.drums.connect(this.input); this.stemGain.music.connect(this.input);
@@ -106,8 +107,8 @@ export class Deck {
     this.xf = ctx.createGain();
     this.echoSend = ctx.createGain(); this.echoSend.gain.value = 0;
 
-    this.input.connect(this.low); this.fxIn.connect(this.low);
-    this.input.connect(this.rawTap);
+    this.input.connect(this.slip); this.slip.connect(this.low); this.fxIn.connect(this.low);
+    this.input.connect(this.rawTap);     // before the slip mute: listener flies hear the track even under a roll
     this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.lp); this.lp.connect(this.hp);
     this.hp.connect(this.tap); this.tap.connect(this.xf); this.xf.connect(mixer.master);
     this.tap.connect(this.echoSend); this.echoSend.connect(mixer.echoIn);
@@ -184,10 +185,9 @@ export class Deck {
   setKeylock(on) {
     if (!this.keyNode) return;
     const wasPlaying = this.playing, resumeAt = this.ctx.currentTime + 0.06, resumePos = this.position(resumeAt);
-    this.input.disconnect();
-    this.input.connect(this.rawTap);
-    if (on) { this.input.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
-    else this.input.connect(this.low);
+    this.slip.disconnect();
+    if (on) { this.slip.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
+    else this.slip.connect(this.low);
     this.keylock = on;
     this._syncPitch();
     if (wasPlaying && this.track) this.play(resumeAt, resumePos);
@@ -228,7 +228,7 @@ export class Deck {
 
   // --- FX (slip mode: the main track keeps running muted underneath) ---
   _duck(at, dur) {
-    const t = this.pre(at), g = this.input.gain;
+    const t = this.pre(at), g = this.slip.gain;
     g.setValueAtTime(1, t); g.linearRampToValueAtTime(0, t + 0.004);
     g.setValueAtTime(0, t + dur - 0.004); g.linearRampToValueAtTime(1, t + dur);
   }

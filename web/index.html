@@ -82,6 +82,7 @@
         <label class="tog"><input type="checkbox" id="ride" checked> fly rides the tempo</label>
         <label class="tog"><input type="checkbox" id="follow" checked> tempo follows each new track</label>
         <label class="tog"><input type="checkbox" id="ears-room"> ears hear room mix</label>
+        <label title="how busy the fly plays: its burst threshold adapts to hit this many moves a minute (all still triggered by its neurons, on bar lines)">moves per minute <b id="pace-val">8</b><input type="range" id="pace" min="2" max="20" step="1" value="8"></label>
         <label title="the fly stays on each track at least this long before mixing out (unless the track runs out)">stay on a track at least <b id="min-on-val">45 s</b><input type="range" id="min-on" min="15" max="120" step="5" value="45"></label>
       </div>
     </div>

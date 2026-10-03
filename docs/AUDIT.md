@@ -300,3 +300,137 @@ Breakdowns trade precision for recall almost one for one.
    - 5-fold cross-validation offline
 5. **Record a naive listener and train v2 on it**, to answer whether the trained synapses help. Load the untouched
    connectome into the DJ fly.
+
+## The approach chosen after research, and its results (3 October)
+
+**Research.**
+- Real DJ mixes (Kim et al., ISMIR 2020, 1,557 mixes):
+  - transitions follow 32-beat phrases
+  - cue points follow song structure, consistently across DJs
+  - about 4 minutes per track
+- DJ practice: effects with a purpose, on the phrase, one at a time, with variety. Overuse and repeating the same
+  trick are the classic mistakes.
+
+So "fewer moves" is the wrong target. The benchmark now scores craft: where moves land, whether they fit the
+section, variety, pace, where mixes happen, and time on air.
+
+**Fair labels.** The All-In-One structure analyzer (Kim & Nam 2023, trained on the human-annotated Harmonix Set)
+labelled all 131 tracks: intro / verse / chorus / break / outro.
+
+5-fold CV macro-F1:
+
+| Features | Macro-F1 |
+|---|---|
+| Song position / order alone | 0.44 |
+| The app's energy analysis | 0.48 ± 0.02 |
+| **The fly's neurons** | **0.50 ± 0.02** |
+| **Fused** | **0.50 ± 0.02**, kept |
+
+Judged against human-style structure, the fly's brain edges out the energy analysis.
+
+**Benchmark.** The full app, 24 held-out tracks the model never saw, 3 runs × 8 min each, mean ± 95% CI.
+
+| DJ craft | Old | **New** |
+|---|---|---|
+| Mixes from an outro / breakdown / intro | 0.16 ± 0.06 | **0.69 ± 0.38** |
+| Mixes mid-song | 0.84 | **0.31** |
+| Moves starting on a 4-bar line | 0.08 ± 0.02 | **0.86 ± 0.05** |
+| Moves that suit their section | 0.52 ± 0.07 | **0.66 ± 0.03** |
+| Variety (normalised entropy) | 0.89 | **0.92** |
+| Same move back to back | 0.20 | **0.02** |
+| Moves per minute | 9.7 ± 2.7 | **4.0 ± 0.6** |
+| Time on air per track | 54 s | **130 s** |
+| Intro / outro sense, precision / recall (both decks) | 0.14 / 0.35 | **0.45 / 0.75** |
+| Breakdown sense, precision / recall | 0.04 / 0.47 | **0.18 / 0.79** |
+| Chorus sense, precision / recall | 0.53 / 0.83 | 0.70 / 0.47 |
+| Load | 0.76 | 0.77 |
+
+**Still short of a professional:**
+- Pace: 4 moves a minute is still busier than the "not every 30 seconds" guidance.
+- Tracks get about 2 minutes on air, against about 4 in real mixes.
+- Breakdowns are sensed with low precision.
+- Mixing metrics rest on few transitions per run, hence the wide intervals.
+
+Next: a phrase-level move budget (about one move per 8–16 bars, more in choruses), a longer default minimum time on
+air, and more runs.
+
+### Pace: a moves-per-minute target, and a listening bug fixed (3 October)
+
+4 moves a minute felt too low for a showcase DJ, and that count excludes builds, horns and filter rides.
+
+- **A target pace** ("moves per minute" slider, default 8). The burst threshold adapts slowly (homeostasis) until
+  the fly's moves reach the target. Moves are still fired by its strongest neuron bursts, queued up to 3, and played
+  on bar lines: every bar in choruses / main sections, every 2 bars elsewhere.
+- **The listener flies went deaf during moves.** Loop rolls, scratches, tape stops and chops mute the deck's main
+  signal while the track slips underneath, and the listener tap sat after that mute. Every such move fed the
+  listeners silence, which reads as a breakdown. The tap now comes before the slip mute.
+
+2 runs × 6 min on the 24 held-out tracks, target 8 a minute:
+
+| | 4 / min (previous) | 9.5 / min, deaf bug | **9.5 / min, fixed** |
+|---|---|---|---|
+| Moves per minute | 4.0 | 9.5 | **9.5 ± 0.3** |
+| Section accuracy (both decks) | 0.50 | 0.37 | **0.50** |
+| Breakdown sense precision | 0.18 | 0.11 | **0.38** |
+| Mixes from outro / breakdown / intro | 0.69 | 0.29 | **0.58 ± 0.16** |
+| Moves fitting their section | 0.66 | 0.54 | **0.65** |
+| Variety / back-to-back repeats | 0.92 / 0.02 | 0.86 / 0.04 | 0.83 / 0.07 |
+| Time on air | 130 s | 82 s | **126 s** |
+
+## Audit 3: pace, palette and mixing, from the raw benchmark events (3 October)
+
+**1. The move palette is narrow; the variety score flatters it.**
+- In the latest runs (114 moves), the echo family (echo / dub / reverb) makes up 55% and loop rolls 26%. Trans gates,
+  filters and wind make up the rest.
+- **Scratches: zero.** None of the bigger moves (chops, stutters, drums out, acid, tease, pump) appear either.
+- The variety score (0.83) counts echo, dub and reverb as different moves. At the level of move families it's low.
+- Cause: the adaptive threshold lowers every group's bar equally, so the group that bursts most (the echo group,
+  DNp02 / 06 / 11 / 55) wins most slots. Scratches are gated on a confident chorus, and in verses they're remapped
+  to trans gates. The big moves only come from a DJ style's own move lists, and the default style has none.
+
+**2. Mixes never come from a sensed outro.**
+- Every scripted mix in the new runs (12 of 13) went through "wants to leave + senses a breakdown"; the other one was
+  "track ending".
+- The outro route never fired. The fly leaves earlier, on breakdown senses, about 40% of which land in a verse or
+  chorus, even at posterior ≥ 0.85 held for 2 bars.
+- So "mixes from calm sections" rests on the weakest sense (breakdown precision 0.38). Meanwhile the outro is sensed
+  well offline (P 0.63 / R 0.81).
+- This is also why tracks get about 2 minutes on air instead of about 4.
+
+**3. The pace control under-counts.** It counts only queued neuron moves, not sense-driven ones, so it overshoots
+(9.5 a minute against a target of 8). At the threshold floor (0.25), cooldowns shrink to a quarter, which lets one
+group repeat within a bar or two.
+
+**4. Benchmark caveats:**
+- The reference sections are All-In-One predictions (state of the art, but not human labels of these songs).
+- The "fits its section" table is my own and overlaps the fly's SECTION_FIT table, so it partly grades itself.
+- Only 2–3 runs, with about 2–4 mixes per run. Mixing metrics have wide intervals.
+
+**5. Still open:**
+- Does the synapse training help v3? (No naive-brain v3 yet.)
+- The DJ fly still carries synapses trained for music.
+- The new features haven't been tried in Safari.
+- No section model for the male CNS.
+
+**Checked and fine:**
+- the slip-mute fix covers every move that ducks the deck
+- moves fire on the last beat before their bar line, as designed
+- a cut restarts the time-on-air clock
+- the queue drops stale moves
+- the visualiser still sees every move (they all go through the Performer)
+
+### Fixes, in order
+1. **Mix outro-first.**
+   - When the fly wants to leave early, it waits for its sensed outro, or the end of the last chorus (a chorus
+     ending in the last third).
+   - The breakdown route only applies in the last quarter, at ≥ 0.9.
+   - Expected: more mixes in outros, and time on air nearer the ~4-minute norm.
+2. **Real variety.**
+   - Per-group fairness in the adaptive threshold: groups that fired a lot recently need a bigger burst.
+   - Scratches allowed in choruses and verses.
+   - The big-move vocabulary (chops, stutter, drums out, tease, pump, acid) as phrase-level moves on 8 / 16-bar lines,
+     where they fit.
+   - The benchmark scores variety by move family.
+3. **The pace counts every move,** with a cooldown floor of 2 bars per group.
+4. **Benchmark:** 5 runs × 12 min, family-level variety, mix reasons in the summary.
+5. **Then the open questions:** naive vs trained v3, the DJ fly's synapses, Safari.

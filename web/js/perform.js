@@ -162,8 +162,8 @@ export class Performer {
     }
     // duck the track a little so the chops sit on top
     const d0 = on.pre(T0), d1 = on.pre(T0 + bars * 4 * spb);
-    on.input.gain.setValueAtTime(1, d0); on.input.gain.linearRampToValueAtTime(0.45, d0 + 0.02);
-    on.input.gain.setValueAtTime(0.45, d1 - 0.02); on.input.gain.linearRampToValueAtTime(1, d1);
+    on.slip.gain.setValueAtTime(1, d0); on.slip.gain.linearRampToValueAtTime(0.45, d0 + 0.02);
+    on.slip.gain.setValueAtTime(0.45, d1 - 0.02); on.slip.gain.linearRampToValueAtTime(1, d1);
     this._lit('chop');
     this.log(`${who || 'you'} → <b>live chops</b> of "${on.track.name}" for ${bars} bars`);
     return T0;

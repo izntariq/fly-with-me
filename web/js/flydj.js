@@ -50,6 +50,14 @@ const PROFILE = {
 };
 // in a breakdown (low energy) the fly reaches for space instead of chops
 const BREAKDOWN = { escape: 'echo', scratch: 'wind', trans: 'flange' };
+// with section sense: the kind of move that suits each section (DJ craft: effects with a purpose, in their place)
+//   intro / outro: filter-type moves and space, no flourishes;  break: space;  verse: rhythmic;  chorus: anything
+const SECTION_FIT = {
+  intro: { escape: 'flange', scratch: 'flange', trans: 'flange' },
+  outro: { escape: 'echo', scratch: 'echo', trans: 'flange' },
+  break: { escape: 'echo', scratch: 'wind', trans: 'flange' },
+  verse: { scratch: 'trans' },
+};
 
 // A listener fly's section sense: its trained readout neurons, averaged over both sides (a listener hears one deck in
 // both ears, as in training), z-scored and smoothed. Live levels sit offset from the offline ones, so each section is
@@ -132,6 +140,13 @@ export class FlyDJ {
     this.offAirSince = [0, 0];
     this.onAirSince = 0;
     this.minOnAir = 45;       // seconds a track stays on air before the fly may leave it (unless it runs out)
+    this.phraseMoves = true;  // the fly's own moves wait for the next 4-bar line (DJs throw effects on the phrase)
+    this.sectionFit = true;   // and pick a move that suits the sensed section
+    this.queue = [];         // moves waiting for their slot on the phrase grid (strongest first, up to 3)
+    this.moveTarget = 8;      // moves per minute the fly aims for; the burst threshold adapts to reach it
+    this.thr = 1;             // that adaptive threshold (x the burst ratio and minimum): < 1 = smaller bursts count
+    this.moveTimes = [];
+    this.slotLine = -1;
     this.lastAny = -1e9; this.lastBuild = -1e9; this.lastHorn = -1e9;
     this.onArrive = null;     // (deck, {snap, at}) => void — a new track is now the one on air
     this.trained = false;     // a brain trained by flybrain.train: its MIX neurons flag mixing windows
@@ -321,18 +336,47 @@ export class FlyDJ {
       m.level = Math.min(1, m.fast / 60);
       if (!m.continuous && this.auto && this.t > 15 && m.slots.length && !this.perf.busy() && !this.pending) {
         const prof = this.profile(), cs = this.coolScale * prof.cool * (this.persona.cool || 1);
-        if (m.fast > m.slow * this.ratioOf(m) + m.min && now - m.lastFire > m.cool * beat * cs
-            && now - this.lastAny > 4 * beat * cs) {
+        const thr = this.phraseMoves ? this.thr : 1;
+        if (m.fast > m.slow * (1 + (this.ratioOf(m) - 1) * thr) + m.min * thr && now - m.lastFire > m.cool * beat * cs * Math.min(1, thr)
+            && now - this.lastAny > (this.phraseMoves ? 2 : 4) * beat * cs) {
           const sec = this.section();
           let key = prof.remap?.[m.key] ?? m.key;
           if (sec.energy < 0.4 || this.sense.space.on) key = BREAKDOWN[key] ?? key;   // breakdown: space, not chops
-          if (m.key === 'scratch' && !this.sense.peak.on) return;              // flourishes only in a main section
+          const ss = this.sectionFit ? this.sectionsOn()?.[this.mixer.onAir() === this.mixer.decks[0] ? 0 : 1]?.state : null;
+          if (ss && ss.conf > 0.55) key = SECTION_FIT[ss.section]?.[key] ?? key;
+          if (m.key === 'scratch' && !this.sense.peak.on && !(ss && ss.section === 'chorus')) return;   // flourishes only in a main section
           if (sec.afterDrop && key !== 'echo' && key !== 'reject') return;      // let the drop breathe
           m.lastFire = now; this.lastAny = now; m.fired = performance.now();
-          this.fire(key, m.label, m.fast / (m.slow + 1), counts[k]);
+          const mv = { key, label: m.label, intensity: m.fast / (m.slow + 1), count: counts[k], t: now };
+          if (this.phraseMoves && key !== 'reject') {
+            this.queue.push(mv); this.queue.sort((p, q) => q.intensity - p.intensity); this.queue.length = Math.min(this.queue.length, 3);
+          }
+          else this.fire(mv.key, mv.label, mv.intensity, mv.count);
         }
       }
     });
+
+    // queued moves play on the bar grid: one per slot, released on the last beat before the line so they land on it
+    // (the Performer plays moves from the next beat). Choruses / main sections have a slot every bar, calmer sections
+    // every 2 bars; stale moves (over 8 bars old) are dropped
+    // pace: nudge the burst threshold toward the target rate (homeostasis, over ~half a minute)
+    this.moveTimes = this.moveTimes.filter((t) => now - t < 60);
+    if (this.t > 30) {
+      const rate = this.moveTimes.length * 60 / Math.min(60, this.t - 15);
+      this.thr = Math.max(0.25, Math.min(2, this.thr * Math.exp(0.01 * (rate - this.moveTarget) * dt)));
+    }
+    this.queue = this.queue.filter((q) => now - q.t < 32 * beat);
+    if (this.queue.length) {
+      const on = this.mixer.onAir(), ss = this.sectionsOn()?.[on === this.mixer.decks[0] ? 0 : 1]?.state;
+      const full = ss ? ss.conf > 0.5 && (ss.section === 'chorus' || ss.section === 'main' || ss.section === 'verse') : this.sense.peak.on;
+      const grid = full ? 4 : 8, b = on.beatAt(), line = Math.floor(b / grid);   // a slot every bar / every 2 bars
+      if (on.playing && ((b % grid) + grid) % grid >= grid - 1 && line !== this.slotLine && !this.perf.busy()) {
+        this.slotLine = line;
+        const q = this.queue.shift();
+        this.moveTimes.push(now);
+        this.fire(q.key, q.label, q.intensity, q.count);
+      }
+    }
 
     this.updateSense(dt);
 
@@ -397,12 +441,24 @@ export class FlyDJ {
         if (intensity > 3) P.brake(who); else P.roll(intensity > 2 ? 0.125 : 0.25, 1, who);
         this.synth.zap(P.nextBeat());
         break;
-      case 'echo': P.beatFx(count % 2 ? 'reverb' : 'echo', intensity > 2 ? 2 : 1, who); break;
+      case 'echo': {          // each family rotates through its variants, never the same one twice in a row
+        const v = this.variant(['echo', 'reverb', 'dub'], count);
+        if (v === 'dub') P.dub(who); else P.beatFx(v, intensity > 2 ? 2 : 1, who);
+        break;
+      }
       case 'scratch': P.scratch(intensity < 2 ? 'baby' : intensity < 2.6 ? 'chirp' : intensity < 3.2 ? 'flare' : 'transformer', 2, who); break;
-      case 'trans': P.beatFx(intensity > 2.5 ? 'crush' : 'trans', intensity > 2.5 ? 2 : 1, who); break;
-      case 'flange': P.beatFx(count % 2 ? 'lpf' : 'flanger', 4, who); break;
+      case 'trans': {
+        const v = this.variant(['trans', 'crush', 'stutter'], intensity > 2.5 ? 1 : count);
+        if (v === 'stutter') P.stutter(who); else P.beatFx(v, v === 'crush' ? 2 : 1, who);
+        break;
+      }
+      case 'flange': {
+        const v = this.variant(['flanger', 'lpf', 'resfilter'], count);
+        if (v === 'resfilter') P.resFilter(who); else P.beatFx(v, 4, who);
+        break;
+      }
       case 'wind':
-        P.beatFx('reverb', 2, who);
+        P.beatFx(this.variant(['reverb', 'sweep'], count), 2, who);
         if (intensity > 2.2) P.sample('siren', who);
         break;
       case 'reject': {
@@ -413,6 +469,14 @@ export class FlyDJ {
         break;
       }
     }
+  }
+
+  // pick a variant from a move family, starting from index i, but not the one played last
+  variant(list, i) {
+    let v = list[((i % list.length) + list.length) % list.length];
+    if (v === this.lastVariant) v = list[(list.indexOf(v) + 1) % list.length];
+    this.lastVariant = this.played = v;
+    return v;
   }
 
   doMove(name, who) {
@@ -525,12 +589,19 @@ export class FlyDJ {
       const mixReady = this.trained && now < this.mixWindow;
       let wants = (this.pref * dir > 0.12 && this.ears.habit[onIdx] >= 0.3 && this.onAirSince >= minOn) || this.onAirSince > maxOn
         || (mixReady && this.onAirSince > minOn && this.ears.habit[onIdx] >= 0.1);
+      let reason = endingSoon ? 'track ending' : wants ? 'the fly wants the other deck' : '';
       const sec = this.sectionsOn()?.[onIdx].state;
       if (sec) {
-        // section sense v2: mix out of a sensed outro; a fly that wants to leave waits for an outro or breakdown,
-        // never mid-main section (unless it has been on air for 3 minutes)
-        const sure = sec.conf > 0.55, outro = sure && sec.section === 'outro', calm = outro || (sure && sec.section === 'break');
-        wants = (outro && this.onAirSince >= minOn) || (wants && calm) || this.onAirSince > Math.max(180, minOn);
+        // section sense: mix out of a sensed outro. A fly that wants to leave earlier waits for a confident, settled
+        // breakdown in the second half of the track. Never mid-song otherwise, unless it has been on for 4 minutes
+        // (about the length a DJ plays a track for)
+        const outro = sec.section === 'outro' && sec.conf > 0.6;
+        const brk = sec.section === 'break' && sec.conf >= 0.85 && sec.held >= 2 && sec.frac >= 0.5;
+        if (outro && this.onAirSince >= minOn) { wants = true; reason = `sensed outro (${Math.round(100 * sec.conf)}%)`; }
+        else if (wants && brk) reason = `the fly wants to leave and senses a breakdown (${Math.round(100 * sec.conf)}%)`;
+        else if (this.onAirSince > Math.max(240, minOn)) { wants = true; reason = '4 minutes on air'; }
+        else wants = false;
+        if (endingSoon && !wants) reason = 'track ending';
       }
 
       if (wants || endingSoon) {
@@ -540,11 +611,11 @@ export class FlyDJ {
         const lead = style === 'blend' ? 0 : style === 'drop' || style === 'double' || style === 'kill' ? 8 : 4;
         let at = onAir.timeOfBeat(phraseBeat - lead);
         if (at < now + 0.1) at = onAir.timeOfBeat(phraseBeat + 16 - lead);
-        this.pending = { at, style, dir };
+        this.pending = { at, style, dir, reason };
         this.cueIncoming(mx.offAir(), at, style);
         const why = { drop: 'giant fiber most excited', echo: 'echo neurons most excited', spin: 'aversion neurons most excited', cut: 'rhythm neurons most excited', double: 'whole brain aroused', kill: 'flanger neurons most excited', blend: 'calm' }[style];
         const names = { drop: 'drop-swap', echo: 'echo out', spin: 'spinback cut', cut: 'hard cut', double: 'double drop', kill: '1-bar kill', blend: 'blend' };
-        this.log(`fly turns ${dir > 0 ? 'right' : 'left'} (pref ${this.pref.toFixed(2)}) → will <b>${names[style]}</b> into deck ${dir > 0 ? 'B' : 'A'} on the next phrase (${why}${this.persona.key !== 'fly' ? ', ' + this.persona.name + ' style' : ''})`);
+        this.log(`fly turns ${dir > 0 ? 'right' : 'left'} → will <b>${names[style]}</b> into deck ${dir > 0 ? 'B' : 'A'} on the next phrase: ${reason || 'its preference'} (${why}${this.persona.key !== 'fly' ? ', ' + this.persona.name + ' style' : ''})`);
         return;
       }
     }
