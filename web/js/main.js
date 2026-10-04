@@ -7,7 +7,7 @@ import { STYLES } from './djstyles.js';
 import { ARCS, energyAt } from './setplan.js';
 import { MC } from './mc.js';
 import { BrainView, Raster, drawEar, drawWave } from './viz.js';
-import { trackFromFile, renderDemo, demoCount, describeDemo } from './tracks.js';
+import { trackFromFile, renderDemo, demoCount, describeDemo, safeName, sha1, applyAnalysis } from './tracks.js';
 import { analyzeEnergy } from './analysis.js';
 import { renderDesi, desiCount } from './desi.js';
 
@@ -108,7 +108,8 @@ const inStyle = (t) => t.source === 'file' || S.style === 'all' || t.style === S
 function pickNext(exclude) {
   for (let k = 0; k < S.crate.length; k++) {
     const t = S.crate[(S.crateNext + k) % S.crate.length];
-    if (!exclude.includes(t) && inStyle(t)) { S.crateNext += k + 1; return t; }
+    // kept within the crate, so a track added at crateNext is the next one up even after the crate grows
+    if (!exclude.includes(t) && inStyle(t)) { S.crateNext = (S.crateNext + k + 1) % S.crate.length; return t; }
   }
   return null;
 }
@@ -122,6 +123,7 @@ function loadNext(i) {
 
 function loadTrack(i, t, why = '') {
   const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
+  if (t.pendingAnalysis && other.track !== t) { applyAnalysis(t, t.pendingAnalysis); t.pendingAnalysis = null; }
   deck.load(t);
   startSynced(deck, other);
   S.ears.resetHabit(i);
@@ -181,7 +183,7 @@ function separate(t) {
     tr.stemProgress = null; stemJobs.delete(id);
     log(`stems ready for "${tr.name}": drums and music can now be muted separately`);
     // decks already playing it switch to stems on the next bar, seamlessly
-    for (const d of S.mixer.decks) if (d.track === tr && d.playing) { const at = d.nextBarTime(); d.jumpTo(at, d.position(at)); }
+    for (const d of S.mixer.decks) if (d.track === tr && d.playing) d.respawn(d.nextBarTime());
     renderCrate();
   };
   const id = ++stemId, b = t.buffer;
@@ -193,15 +195,50 @@ function separate(t) {
 async function addFiles(files) {
   for (const f of files) {
     if (!f.type.startsWith('audio') && !/\.(mp3|wav|ogg|flac|m4a|aac|aiff?)$/i.test(f.name)) continue;
-    log(`analysing "${f.name}"…`);
+    log(`analysing "${safeName(f.name)}"…`);
     try {
       const t = await trackFromFile(S.ctx, f);
-      S.crate.splice(S.crateNext % (S.crate.length + 1), 0, t);   // user tracks play next
-      log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}`);
+      await withAnalysis(t, f);
+      const at = S.crate.length ? S.crateNext % S.crate.length : 0;
+      S.crate.splice(at, 0, t);                       // user tracks play next
+      log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}${t.gridSource ? ' · analysed beat grid + song structure' : ''}`);
       if (!window.flyNoStems) separate(t);          // tests can skip stem separation (CPU heavy)
       renderCrate();
-    } catch (e) { log(`could not decode "${f.name}": ${e.message}`); }
+    } catch (e) { log(`could not decode "${safeName(f.name)}": ${e.message}`); }
   }
+}
+
+// The server's analysis of a track (beat grid + song structure), found by the file's SHA-1. An unknown track is
+// uploaded for gentle background analysis and picked up later; it's applied only while no deck is playing it.
+async function withAnalysis(t, f, tries = 0) {
+  try {
+    const buf = await f.arrayBuffer(), sha = await sha1(buf);
+    t.sha = sha;
+    // a track already on a deck takes its analysis when it next leaves it (its beat grid can't jump mid-play)
+    const use = (a, quiet) => {
+      if (S.mixer.decks.some((d) => d.track === t)) t.pendingAnalysis = a;
+      else if (!applyAnalysis(t, a)) { log(`"${t.name}": analysis not used (${t.analysisRejected || 'too few beats'})`); return; }
+      if (!quiet) { log(`"${t.name}": beat grid + song structure analysed`); renderCrate(); }
+    };
+    const r = await fetch(`/analysis/${sha}`);
+    if (r.status === 200) { use(await r.json(), tries === 0); return; }
+    // the server has just started and is still hashing the library: ask again in a few seconds, in the background (the
+    // track goes into the crate meanwhile), before uploading anything
+    if (r.status === 202 && (await r.clone().json().catch(() => ({}))).status === 'indexing') {
+      if (tries < 60) setTimeout(() => withAnalysis(t, f, tries + 1), 3000);
+      return;
+    }
+    if (r.status === 404) {
+      const ext = (f.name.match(/\.[a-z0-9]+$/i) || ['.mp3'])[0];
+      await fetch(`/analysis/${sha}`, { method: 'POST', body: buf, headers: { 'X-Ext': ext } }).catch(() => {});
+    }
+    const poll = setInterval(async () => {
+      if (t.gridSource) return clearInterval(poll);
+      const q = await fetch(`/analysis/${sha}`).catch(() => null);
+      if (q?.status === 200) { clearInterval(poll); use(await q.json(), false); }
+      else if (!q || q.status === 404) clearInterval(poll);
+    }, 30000);
+  } catch (e) { /* no analysis: the in-browser grid and the listener flies' section sense stand in */ }
 }
 
 // ---------------- start ----------------
@@ -209,6 +246,15 @@ async function start() {
   if (!S.hello) { $('#splash-msg').textContent = 'waiting for the brain server… (python -m flybrain.server)'; return; }
   $('#btn-start').disabled = true;
   const ctx = S.ctx = new AudioContext({ latencyHint: 'interactive' });
+  // Safari can suspend / interrupt audio (sleep, Bluetooth switch, a call): offer a one-tap resume instead of silence
+  const resume = () => ctx.resume().then(() => document.querySelector('#resume')?.remove()).catch(() => {});
+  ctx.onstatechange = () => {
+    if (ctx.state === 'running' || document.querySelector('#resume')) return;
+    const b = document.createElement('button'); b.id = 'resume'; b.textContent = '▶ audio paused by the browser: tap to resume';
+    Object.assign(b.style, { position: 'fixed', left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 99, fontSize: '15px', padding: '10px 18px' });
+    b.onclick = resume; document.body.append(b);
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx.state !== 'running') resume(); });
   const mixer = S.mixer = new Mixer(ctx);
   const bands = S.hello.inputs.filter((c) => c.ear).map((c) => ({ name: c.name, ear: c.ear, lo: c.lo, hi: c.hi }));
   S.bands = bands;
@@ -312,7 +358,8 @@ function control() {
     const ride = S.dj.auto && $('#ride').checked ? S.dj.tempoOffset : 0;
     const target = S.tempo.base * (1 + ride);
     S.tempo.cur += (target - S.tempo.cur) * Math.min(1, dt / 0.6);
-    if (Math.abs(S.tempo.cur - S.tempo.applied) > 0.02) { S.mixer.applyTempo(S.tempo.cur); S.tempo.applied = S.tempo.cur; }
+    const held = S.ctx.currentTime < (S.dj.holdTempoUntil || 0);   // a transition is lined up on the current tempo
+    if (!held && Math.abs(S.tempo.cur - S.tempo.applied) > 0.02) { S.mixer.applyTempo(S.tempo.cur); S.tempo.applied = S.tempo.cur; }
   }
   // follow the on-air deck's key
   const on = S.mixer.onAir();
@@ -752,7 +799,7 @@ function toggleRecord() {
   rec.onstop = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
-    a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm`;
+    a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${/mp4/.test(rec.mimeType) ? 'm4a' : 'webm'}`;   // Safari records mp4
     a.click();
     S.mixer.out.disconnect(dest); rec = null;
     exportSet();

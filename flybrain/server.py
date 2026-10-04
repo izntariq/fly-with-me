@@ -15,6 +15,7 @@ descending neurons of listener A drive the 12 Johnston's-organ bands of its LEFT
 from __future__ import annotations
 
 import argparse
+from urllib.parse import urlparse
 import asyncio
 import json
 import logging
@@ -29,7 +30,8 @@ from aiohttp import WSMsgType, web
 from .brain import Brain
 from .mapping import brain_xy, brain_xyz, build_inputs, build_outputs, load_annotations
 
-WEB = Path(__file__).resolve().parent.parent / "web"
+ROOT = Path(__file__).resolve().parent.parent
+WEB = ROOT / "web"
 FRAME_MS = 20.0
 VIZ_MAX = 2400              # spikes per frame sent for the brain pictures (split between the flies)
 RUNAWAY_SPIKES = 12_000     # per frame (= 600k spikes/s); seizure-like state -> reset
@@ -138,11 +140,13 @@ class FlyServer:
                 from .gpu import GPUBrains
                 self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gpu")
                 self.gpu = self.executor.submit(GPUBrains, flies, weights=self.brain.weights).result()
+                self.executor.submit(self.gpu.run, 1.25).result()          # compile the Metal kernels now, not mid-set
+                self.executor.submit(self.gpu.reset).result()
             except Exception as e:                      # no MLX / not Apple silicon
                 if gpu:
                     raise
                 self.gpu, self.executor = None, None
-                log.info("GPU not available (%s); using the CPU", e)
+                log.warning("GPU not available (%s); using the CPU", e, exc_info=not isinstance(e, ImportError))
         self.parallel = self.gpu is None and parallel and flies > 1
         if self.gpu is not None:
             self.brains = [GPUFly(self.gpu, k, self.executor) for k in range(flies)]
@@ -166,7 +170,8 @@ class FlyServer:
         self.tap_rate = np.zeros((2, len(self.taps)))  # smoothed tap rates for listeners A and B
         self.clients: set[web.WebSocketResponse] = set()
         self.runaway = [0] * len(self.brains)
-        self.pokes = [[] for _ in self.brains]          # (neuron idx, Hz, until) stimulation from the visualiser
+        self.pokes = [[] for _ in self.brains]
+        self.analyses = Analyses()          # (neuron idx, Hz, until) stimulation from the visualiser
         if self.gpu is None and not self.parallel:
             self.brain.set_stim(np.zeros(1, np.int64), np.zeros(1))
             self.brain.run(1)  # JIT warm-up
@@ -224,6 +229,20 @@ class FlyServer:
         return [b.run(FRAME_MS) for b in self.brains]
 
     async def loop(self):
+        """Run the brain forever. A failing frame (a worker that died, a GPU error) is logged and retried, instead of
+        silently stopping every frame while the page stays up."""
+        failures = 0
+        while True:
+            try:
+                await self._run_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failures += 1
+                log.exception("brain loop failed (%d); restarting it in 1 s", failures)
+                await asyncio.sleep(1.0)
+
+    async def _run_loop(self):
         ex = asyncio.get_running_loop()
         clock = self.brains[0]          # the brain-time clock (fly 1)
         wall0, brain0 = time.perf_counter(), clock.t_ms
@@ -286,7 +305,16 @@ class FlyServer:
         except Exception:
             self.clients.discard(ws)
 
+    @staticmethod
+    def _check_origin(request, what):
+        # pages from other sites may not drive the brain or upload files (a browser sends their Origin)
+        origin = request.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", request.host.split(":")[0]):
+            log.warning("refused %s from %s", what, origin)
+            raise web.HTTPForbidden()
+
     async def ws_handler(self, request):
+        self._check_origin(request, "a websocket")
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=1 << 20)
         await ws.prepare(request)
         await ws.send_str(json.dumps(self.hello()))
@@ -309,7 +337,7 @@ class FlyServer:
                     k = int(d.get("fly", 0))
                     idx = np.asarray(d.get("idx", [])[:64], np.int64)
                     idx = idx[(idx >= 0) & (idx < self.brain.n)]
-                    if 0 <= k < len(self.brains) and len(idx):
+                    if 0 <= k < len(self.brains) and len(idx) and len(self.pokes[k]) < 16:
                         hz = max(0.0, min(300.0, float(d.get("hz", 150))))
                         ms = max(0.0, min(3000.0, float(d.get("ms", 800))))
                         self.pokes[k].append((idx, hz, time.perf_counter() + ms / 1000))
@@ -327,8 +355,101 @@ class FlyServer:
     async def xy_handler(self, request):
         return web.Response(body=self.xy, content_type="application/octet-stream")
 
+    async def analysis_get(self, request):
+        a = self.analyses.get(request.match_info["sha"])
+        if a is None:
+            raise web.HTTPNotFound()
+        if a in ("queued", "indexing"):                    # indexing: the library isn't hashed yet, ask again shortly
+            return web.json_response({"status": a}, status=202)
+        return web.json_response(a)
+
+    async def analysis_post(self, request):
+        self._check_origin(request, "an upload")
+        sha = request.match_info["sha"]
+        data = await request.read()
+        import hashlib
+        if hashlib.sha1(data).hexdigest() != sha:
+            raise web.HTTPBadRequest(text="hash mismatch")
+        ext = re.sub(r"[^.a-z0-9]", "", (request.headers.get("X-Ext") or ".mp3").lower())[:6] or ".mp3"
+        self.analyses.submit(sha, data, ext)
+        return web.json_response({"status": "queued"}, status=202)
+
     async def xyz_handler(self, request):
         return web.Response(body=self.xyz, content_type="application/octet-stream")
+
+
+class Analyses:
+    """Beat grid and song structure for tracks the app plays: All-In-One results (tools/label_queue.py) for the user's
+    library, found by the audio file's SHA-1, plus a gentle background queue that analyses unknown dropped files
+    (one at a time, 4 threads, background priority) if the analyzer's environment (.venv-allin1) is installed."""
+
+    def __init__(self):
+        self.lib = ROOT / "data" / "realtracks"
+        self.up = ROOT / "data" / "uploads"
+        self.index_file = self.lib / "hash_index.json"
+        self.index = json.loads(self.index_file.read_text()) if self.index_file.exists() else {}
+        self.busy = set()
+        self.indexing = True
+        self.py = ROOT / ".venv-allin1" / "bin" / "python"
+        import threading
+        self.idx_lock = threading.Lock()                  # the index (brief)
+        self.run_lock = threading.Lock()                  # one analysis at a time (minutes)
+        threading.Thread(target=self._index_library, daemon=True).start()
+
+    def _index_library(self):
+        import hashlib
+        try:
+            known = set(self.index.values())
+            files = {}                                    # slug -> file: two different files must not share a slug
+            for f in ("tracks.json", "tracks_more.json"):
+                p = self.lib / f
+                if not p.exists():
+                    continue
+                for t in json.loads(p.read_text()):
+                    if files.setdefault(t["slug"], t["file"]) != t["file"]:
+                        log.warning("track analyses: %s and %s share the slug %s; the second is left unindexed", files[t["slug"]], t["file"], t["slug"])
+                        continue
+                    if t["slug"] in known or not Path(t["file"]).exists():
+                        continue
+                    h = hashlib.sha1(Path(t["file"]).read_bytes()).hexdigest()
+                    with self.idx_lock:
+                        self.index[h] = t["slug"]
+            with self.idx_lock:
+                tmp = self.index_file.with_suffix(".tmp")
+                tmp.write_text(json.dumps(self.index))
+                os.replace(tmp, self.index_file)          # atomic: a crash mid-write can't leave half an index
+        finally:
+            self.indexing = False
+        log.info("track analyses: %d library tracks indexed", len(self.index))
+
+    def get(self, sha: str):
+        slug = self.index.get(sha)
+        for p in ([self.lib / "allin1" / f"{slug}.json"] if slug else []) + [self.up / f"{sha}.json"]:
+            if p.exists():
+                a = json.loads(p.read_text())
+                return {k: a.get(k) for k in ("bpm", "beats", "downbeats", "segments")}
+        return "queued" if sha in self.busy else "indexing" if self.indexing else None
+
+    def submit(self, sha: str, data: bytes, ext: str):
+        if not self.py.exists() or sha in self.busy or self.get(sha) is not None:    # known, queued, or still indexing
+            return
+        self.up.mkdir(parents=True, exist_ok=True)
+        path = self.up / f"{sha}{ext}"
+        path.write_bytes(data)
+        self.busy.add(sha)
+        import subprocess
+        import threading
+
+        def run():
+            with self.run_lock:                           # one analysis at a time
+                try:
+                    subprocess.run(["nice", "-n", "12", str(self.py), str(ROOT / "tools" / "label_one.py"),
+                                    str(path), str(self.up)], capture_output=True, timeout=15 * 60)
+                except subprocess.TimeoutExpired:
+                    log.warning("track analysis %s: timed out", sha[:10])
+            self.busy.discard(sha)
+            log.info("track analysis %s: %s", sha[:10], "done" if (self.up / f"{sha}.json").exists() else "failed")
+        threading.Thread(target=run, daemon=True).start()
 
 
 def versioned_page(name: str) -> str:
@@ -353,13 +474,15 @@ async def no_stale(request, response):
 
 
 def make_app(server: FlyServer) -> web.Application:
-    app = web.Application()
+    app = web.Application(client_max_size=400 * 1024 * 1024)      # dropped tracks can be uploaded for analysis
     app.router.add_get("/", page)
     app.router.add_get("/{name:index|viz}.html", page)
     app.on_response_prepare.append(no_stale)
     app.router.add_get("/ws", server.ws_handler)
     app.router.add_get("/brain_xy.bin", server.xy_handler)
     app.router.add_get("/brain_xyz.bin", server.xyz_handler)
+    app.router.add_get("/analysis/{sha:[0-9a-f]{40}}", server.analysis_get)
+    app.router.add_post("/analysis/{sha:[0-9a-f]{40}}", server.analysis_post)
     app.router.add_static("/", WEB)
 
     async def start(app):

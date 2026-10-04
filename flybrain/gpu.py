@@ -207,6 +207,10 @@ class GPUBrains:
         self.last_counts = np.array(counts).astype(np.int64)      # spikes per fly this call (all neurons)
         o = np.asarray(out)
         k = min(int(o[0]), CAP)
+        if int(o[0]) > CAP and not getattr(self, "_warned_cap", False):
+            import logging
+            logging.getLogger("flybrain").warning("GPU spike list overflowed (%d > %d entries): some spikes dropped this frame", int(o[0]), CAP)
+            self._warned_cap = True
         e = o[1:1 + 2 * k].reshape(-1, 2).astype(np.int64)
         fly, neuron = np.divmod(e[:, 0], self.n)
         w, m = e[:, 1] >> 8, e[:, 1] & 0xFF

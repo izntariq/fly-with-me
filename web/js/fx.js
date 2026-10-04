@@ -22,6 +22,7 @@ export class FXRack {
     this.hp = ctx.createBiquadFilter(); this.hp.type = 'highpass'; this.hp.frequency.value = 10; this.hp.Q.value = 1.1;
     this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 22000; this.lp.Q.value = 1.1;
     this.gate = g();
+    this.gapG = g();     // the pre-drop silence has its own stage, so trans / pump re-scheduling the gate can't erase it
     // bit crusher: quantising waveshaper blended with the dry signal
     this.crushDry = g(); this.crushWet = g(); this.crushWet.gain.value = 0;
     const shaper = ctx.createWaveShaper(), curve = new Float32Array(4096);
@@ -41,7 +42,7 @@ export class FXRack {
     this.verbRet = g(); this.verbRet.gain.value = 0.9;
 
     this.in.connect(this.hp); this.hp.connect(this.lp);
-    this.lp.connect(this.gate); this.lp.connect(this.verbSend);
+    this.lp.connect(this.gapG); this.gapG.connect(this.gate); this.lp.connect(this.verbSend);
     this.gate.connect(this.crushDry); this.gate.connect(shaper); shaper.connect(this.crushWet);
     this.crushDry.connect(this.crushSum); this.crushWet.connect(this.crushSum);
     this.crushSum.connect(this.out);
@@ -67,7 +68,7 @@ export class FXRack {
   }
   lowpassDip(at, beats) {
     const f = this.lp.frequency, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(350, at + beats * this.spb * 0.5);
+    f.cancelScheduledValues(at); this.lp.Q.cancelScheduledValues(at); this.lp.Q.setValueAtTime(1.1, at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(350, at + beats * this.spb * 0.5);
     f.exponentialRampToValueAtTime(22000, end); this._mark('lpf', end);
   }
   // rhythmic volume chop ("trans"), div = notes per beat
@@ -80,7 +81,7 @@ export class FXRack {
   }
   // silence the dry signal (reverb tail keeps ringing) — the gap before a drop
   gap(at, dur) {
-    const gg = this.gate.gain;
+    const gg = this.gapG.gain;
     gg.setValueAtTime(1, at); gg.linearRampToValueAtTime(0, at + 0.01); gg.setValueAtTime(0, at + dur - 0.005); gg.linearRampToValueAtTime(1, at + dur);
   }
   crush(at, beats) {
@@ -117,7 +118,7 @@ export class FXRack {
   // then slams back on the downbeat
   singalong(at, beats) {
     const f = this.lp.frequency, gg = this.gate.gain, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(220, at + this.spb);
+    f.cancelScheduledValues(at); this.lp.Q.cancelScheduledValues(at); this.lp.Q.setValueAtTime(1.1, at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(220, at + this.spb);
     f.setValueAtTime(220, end - 0.01); f.setValueAtTime(22000, end);
     gg.setValueAtTime(1, at); gg.linearRampToValueAtTime(0.3, at + this.spb); gg.setValueAtTime(0.3, end - 0.01); gg.setValueAtTime(1, end);
     this._mark('lpf', end);

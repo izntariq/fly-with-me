@@ -97,10 +97,108 @@ export function findCues(buffer, bpm, firstBeat) {
 // the arrangement every demo track uses: intro 8 | build 8 | main 16 | break 4 | main 8 | outro 4 (bars)
 export const DEMO_CUES = [{ name: 'intro', beat: 0 }, { name: 'build', beat: 32 }, { name: 'drop', beat: 64 }, { name: 'break', beat: 128 }, { name: 'drop 2', beat: 144 }];
 
+// ---------------- analysed beat grid + song structure (All-In-One, from the server: /analysis/<sha1>) ----------------
+// The in-browser beat tracker gets the tempo octave or the bar phase wrong on about half of real songs. When the server
+// knows a track (the user's library is analysed offline), its downbeats give the bar grid and its sections the
+// structure: intro / verse / chorus / break / outro per bar, and hot cues on real section starts.
+const SECTION_OF = { start: 'intro', intro: 'intro', verse: 'verse', chorus: 'chorus', inst: 'chorus', solo: 'chorus',
+  bridge: 'break', break: 'break', outro: 'outro', end: 'outro' };
+
+export async function sha1(buf) {
+  const h = await crypto.subtle.digest('SHA-1', buf);
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// least-squares line y = b + m x
+const linfit = (xs, ys) => {
+  const n = xs.length, mx = xs.reduce((p, q) => p + q, 0) / n, my = ys.reduce((p, q) => p + q, 0) / n;
+  let sxy = 0, sxx = 0;
+  xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; });
+  const m = sxy / sxx;
+  return { m, b: my - m * mx };
+};
+
+// robust bar grid through downbeat times. Numbering the downbeats 0, 1, 2 ... breaks on one missed or extra downbeat:
+// every later index shifts and skews the whole fit, even the tempo. So number them by their spacing (bar by bar, then
+// against the fitted grid), fit a line, and refit without the outliers. off: the share of downbeats that are neither
+// on the line nor at a half bar (the tracker adds those in places; they cost nothing, and neither do bars with no
+// downbeat at all, as in a beatless breakdown): what a fixed grid can't explain
+function barGrid(db) {
+  const gaps = db.slice(1).map((v, i) => v - db[i]).sort((p, q) => p - q), med = gaps[gaps.length >> 1];
+  let idx = [0];
+  for (let i = 1; i < db.length; i++) idx.push(idx[i - 1] + Math.round((db[i] - db[i - 1]) / med));   // 0: an extra
+  let fit = linfit(idx, db), keep = idx.map(() => true);
+  for (let pass = 0; pass < 2; pass++) {
+    idx = db.map((y) => Math.round((y - fit.b) / fit.m));
+    keep = idx.map((k, i) => Math.abs(db[i] - (fit.b + fit.m * k)) < fit.m / 4);
+    if (keep.filter(Boolean).length < 8) break;
+    fit = linfit(idx.filter((_, i) => keep[i]), db.filter((_, i) => keep[i]));
+  }
+  const on = new Set(idx.filter((_, i) => keep[i])), nIn = keep.filter(Boolean).length;
+  const drift = Math.sqrt(db.reduce((p, y, i) => p + (keep[i] ? (y - (fit.b + fit.m * idx[i])) ** 2 : 0), 0) / Math.max(1, nIn));
+  const off = db.filter((y, i) => { const f = Math.abs((y - fit.b) / fit.m - idx[i]); return !keep[i] && Math.abs(f - 0.5) >= 0.125; }).length / db.length;
+  return { ...fit, drift, off, bars: on.size };
+}
+
+export function applyAnalysis(t, a) {
+  const db = (a.downbeats || []).filter((x) => x >= 0);
+  if (db.length < 8) return false;
+  // the analysis must be of this very recording: a different file (another edit, a name clash) would carry another
+  // song's structure
+  const end = a.segments?.length ? a.segments[a.segments.length - 1].end : db[db.length - 1];
+  if (Math.abs(end - t.buffer.duration) > 3) { t.analysisRejected = 'length mismatch'; return false; }
+  // a track that changes tempo (a beat switch, a half-time section) has no one grid; then fit its end, where the
+  // DJ mixes out, and cut rather than blend
+  let fit, part = 1;
+  for (part of [1, 0.5, 0.3]) { fit = barGrid(db.slice(Math.floor(db.length * (1 - part)))); if (fit.off <= 0.1 && fit.bars >= 8) break; }
+  const t0 = db[Math.floor(db.length * (1 - part))];
+  if (!(fit.off <= 0.1 && fit.bars >= 8)) { t.analysisRejected = 'no steady grid'; return false; }
+  // beats per bar: 3 for waltzes and 6/8 ballads (the app counts 4-beat bars, so these get the beat tempo and no
+  // phrase-matched blends), else 4
+  const bt = (a.beats || []).filter((x) => x >= t0), bg = bt.slice(1).map((v, i) => v - bt[i]).sort((p, q) => p - q);
+  const bpb = bg.length > 8 && Math.round(fit.m / bg[bg.length >> 1]) === 3 ? 3 : 4;
+  const bpm = 60 * bpb / fit.m, drift = fit.drift;
+  if (!(bpm > 50 && bpm < 220)) { t.analysisRejected = 'tempo'; return false; }
+  const bar = 240 / bpm;                                           // the app's 4-beat bar
+  let first = fit.b;
+  first -= Math.floor(first / bar) * bar;                          // the first bar line at or after 0 s
+  t.appGrid = { bpm: t.bpm, firstBeat: t.firstBeat };
+  t.bpm = Math.round(bpm * 100) / 100; t.firstBeat = first; t.gridDrift = drift; t.gridSource = 'analysed'; t.meter = bpb;
+  // the tempo really moves (live drummers, rubato, metre changes): a fixed grid drifts off by more than 1/16 bar, so
+  // beat-matched blends would drift out of time; the DJ cuts in and out of these instead
+  t.steady = part === 1 && bpb === 4 && drift <= fit.m / 16 && fit.off <= 0.05;
+  const nb = Math.max(1, Math.floor((t.buffer.duration - first) / bar));
+  const segs = (a.segments || []).map((g) => [g.start, g.end, SECTION_OF[g.label] || 'verse']);
+  t.sections = Array.from({ length: nb }, (_, b) => {
+    const m = first + (b + 0.5) * bar, g = segs.find(([s0, s1]) => m >= s0 && m < s1);
+    return g ? g[2] : (segs.length && m >= segs[segs.length - 1][1] ? 'outro' : 'intro');
+  });
+  t.energy = analyzeEnergy(t.buffer, t.bpm, t.firstBeat).energy;
+  // hot cues on real section starts: intro, the 8 bars before the first chorus, the first chorus, the first break after it
+  const startOf = (b0, pred) => { for (let b = b0; b < nb; b++) if (pred(t.sections[b]) && (b === 0 || !pred(t.sections[b - 1]))) return b; return -1; };
+  const drop = startOf(1, (x) => x === 'chorus'), brk = drop >= 0 ? startOf(drop, (x) => x === 'break') : -1;
+  t.cues = [{ name: 'intro', beat: 0 }];
+  if (drop > 0) t.cues.push({ name: 'build', beat: Math.max(0, drop - 8) * 4 }, { name: 'drop', beat: drop * 4 });
+  if (brk > 0) t.cues.push({ name: 'break', beat: brk * 4 });
+  // the exit, planned so the mix finishes before the track does:
+  //   an outro of 10+ bars: blend across it from its first bar
+  //   a short outro (pop songs: median 4 bars): echo out right as the last verse / chorus ends
+  //   no outro at all: blend from the 4-bar line ~12 bars before the end
+  let last = -1; t.sections.forEach((x, b) => { if (x === 'verse' || x === 'chorus') last = b; });
+  const outro = last + 1, room = nb - outro;
+  if (last >= 0 && outro >= nb * 0.5 && room >= 10) { t.mixBar = outro; t.exit = 'blend'; }
+  else if (last >= 0 && outro >= nb * 0.5 && room >= 2) { t.mixBar = outro; t.exit = 'echo'; }
+  else { const m = Math.max(0, nb - 12); t.mixBar = m - (m % 4); t.exit = 'blend'; }
+  return true;
+}
+
+export const safeName = (s) => String(s).replace(/</g, '‹').replace(/>/g, '›');
+
 export async function trackFromFile(ctx, file) {
   const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
   const { bpm, firstBeat } = await detectBeat(buffer);
-  const name = file.name.replace(/\.[^.]+$/, '');
+  // track names end up in HTML (log, crate): angle brackets become look-alikes so a file name can never be markup
+  const name = safeName(file.name.replace(/\.[^.]+$/, ''));
   const a = analyzeTrack(buffer, name, bpm, firstBeat);
   return { name, buffer, bpm, firstBeat, peaks: peaks(buffer), source: 'file', cues: findCues(buffer, bpm, firstBeat),
            root: 45 + ((a.key.pc - 9 + 12) % 12), scale: a.key.mode === 'minor' ? 'minpent' : 'majpent',

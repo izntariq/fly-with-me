@@ -108,7 +108,11 @@ export class Deck {
     this.echoSend = ctx.createGain(); this.echoSend.gain.value = 0;
 
     this.input.connect(this.slip); this.slip.connect(this.low); this.fxIn.connect(this.low);
-    this.input.connect(this.rawTap);     // before the slip mute: listener flies hear the track even under a roll
+    // rawTap is fed straight from each playing source (play), before stem mutes and the slip mute: listener flies hear
+    // the whole track even under a roll, a scratch or "drums out"
+    this.ducks = [];                     // [t0, t1, level] slip-mute intervals; overlapping moves share one schedule
+    this.jumps = [];                     // scheduled jumps, in time order: each { ctx, pos } takes over the timeline at ctx
+    this.outs = [];                      // sources a scheduled jump has taken over from, playing until their stop time
     this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.lp); this.lp.connect(this.hp);
     this.hp.connect(this.tap); this.tap.connect(this.xf); this.xf.connect(mixer.master);
     this.tap.connect(this.echoSend); this.echoSend.connect(mixer.echoIn);
@@ -116,9 +120,18 @@ export class Deck {
 
   get bpm() { return this.track ? this.track.bpm * this.rate : 0; }
   get duration() { return this.track ? this.track.buffer.duration : 0; }
+  // the timeline in effect at ctx time `at`: a scheduled jump only takes over once its time comes
+  _promote() {
+    const now = this.ctx.currentTime;
+    while (this.jumps.length && now >= this.jumps[0].ctx) { const j = this.jumps.shift(); this.anchorCtx = j.ctx; this.anchorPos = j.pos; }
+  }
+  // [[ctx, pos], ...]: the anchor, then each scheduled jump
+  _timeline() { this._promote(); return [[this.anchorCtx, this.anchorPos], ...this.jumps.map((j) => [j.ctx, j.pos])]; }
   position(at = this.ctx.currentTime) {
     if (!this.playing) return this.anchorPos;
-    return this.anchorPos + (at - this.anchorCtx) * this.rate;
+    const tl = this._timeline();
+    let k = 0; while (k + 1 < tl.length && at >= tl[k + 1][0]) k++;
+    return tl[k][1] + (at - tl[k][0]) * this.rate;
   }
   // beat index (float) at ctx time `at`
   beatAt(at = this.ctx.currentTime) {
@@ -126,13 +139,18 @@ export class Deck {
     return (this.position(at) - this.track.firstBeat) * this.track.bpm / 60;
   }
   // ctx time at which beat index `b` will play (assumes constant rate)
-  timeOfBeat(b) {
-    const pos = this.track.firstBeat + b * 60 / this.track.bpm;
-    return this.anchorCtx + (pos - this.anchorPos) / this.rate;
+  // (the first time at or after `after`: a jump back plays some beats twice)
+  timeOfBeat(b, after = -Infinity) {
+    const pos = this.track.firstBeat + b * 60 / this.track.bpm, tl = this._timeline();
+    for (let i = 0; i < tl.length; i++) {                // the first timeline piece that reaches `pos` while it is in effect
+      const t = tl[i][0] + (pos - tl[i][1]) / this.rate;
+      if ((i === 0 || t >= tl[i][0]) && t < (tl[i + 1]?.[0] ?? Infinity) && t >= after) return t;
+    }
+    return tl[0][0] + (pos - tl[0][1]) / this.rate;
   }
   nextBeatTime(div = 1, at = this.ctx.currentTime) {
     const b = this.beatAt(at);
-    return this.timeOfBeat(Math.ceil((b + 1e-4) * div) / div);
+    return this.timeOfBeat(Math.ceil((b + 1e-4) * div) / div, at - 1e-3);
   }
 
   load(track) {
@@ -149,48 +167,69 @@ export class Deck {
   get lat() { return this.keylock ? (this.mixer.keylockLatency || 0) : 0; }
   pre(t) { return Math.max(this.ctx.currentTime, t - this.lat); }
 
+  // start (or jump) playback at track position `pos`, heard at ctx time `at`. Whatever is playing keeps playing until
+  // then and crossfades out over a few ms, so a jump scheduled a bar ahead doesn't leave a bar of silence
   play(at = this.ctx.currentTime, pos = this.anchorPos) {
     if (!this.track) return;
-    this._stopSrc();
     // `when` is when it will be heard; the source starts `lat` earlier (or now, and is heard `lat` later)
     const startPos = Math.max(0, pos), when = Math.max(at, this.ctx.currentTime + this.lat), srcAt = this.pre(when);
+    const wasPlaying = this.playing && (this.srcs || []).length;
+    this._stopSrc(srcAt);
     const mk = (buffer, dest) => {
-      const s = this.ctx.createBufferSource();
-      s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(dest); s.start(srcAt, startPos);
+      const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+      s.buffer = buffer; s.playbackRate.value = this.rate; s.connect(g); g.connect(dest); g.connect(this.rawTap);
+      g.gain.setValueAtTime(0, srcAt); g.gain.linearRampToValueAtTime(1, srcAt + 0.005);
+      s.start(srcAt, startPos); s._g = g; s._t0 = srcAt; s._t1 = Infinity;
       return s;
     };
     this._syncPitch(when);
     const st = this.track.stems;
     this.srcs = st ? [mk(st.drums, this.stemGain.drums), mk(st.music, this.stemGain.music)] : [mk(this.track.buffer, this.input)];
     const src = this.srcs[0];
-    src.onended = () => { if (this.src === src) { this.playing = false; this.anchorPos = this.duration; this.onEnded?.(this); } };
+    src.onended = () => { if (this.src === src) { this.playing = false; this.anchorPos = this.duration; this.jumps = []; this.onEnded?.(this); } };
     this.src = src;
-    this.anchorCtx = srcAt + this.lat;
-    this.anchorPos = startPos;
+    // a later play supersedes the jumps scheduled from its time on
+    const heard = srcAt + this.lat;
+    this.jumps = this.jumps.filter((j) => j.ctx < heard);
+    if (wasPlaying && srcAt > this.ctx.currentTime + 0.002) this.jumps.push({ ctx: heard, pos: startPos });
+    else { this.jumps = []; this.anchorCtx = heard; this.anchorPos = startPos; }
     this.playing = true;
   }
 
   stop() {
     if (this.playing) this.anchorPos = this.position();
     this._stopSrc();
-    this.playing = false;
+    this.playing = false; this.jumps = [];
   }
-  _stopSrc() {
+  // stop every source still sounding at ctx time `at` (default now) with a short fade, so cuts don't click: the
+  // playing ones, and those a scheduled jump has yet to take over from (else they would play on until that jump)
+  _stopSrc(at = this.ctx.currentTime) {
     if (this.src) this.src.onended = null;
-    for (const s of this.srcs || []) { try { s.stop(); } catch (e) {} s.disconnect(); }
+    const now = this.ctx.currentTime, t = Math.max(at, now);
+    this.outs = this.outs.filter((s) => s._t1 > now);
+    for (const s of [...(this.srcs || []), ...this.outs]) {
+      if (s._t1 <= t) continue;                          // already stopping before then
+      const g = s._g?.gain;
+      if (g) { g.cancelScheduledValues(t); g.setValueAtTime(t >= s._t0 + 0.005 ? 1 : 0, t); g.linearRampToValueAtTime(0, t + 0.005); }
+      try { s.stop(t + 0.006); } catch (e) {}
+      s._t1 = t + 0.006;
+      clearTimeout(s._gc);
+      s._gc = setTimeout(() => { try { s.disconnect(); s._g?.disconnect(); } catch (e) {} }, (t - now + 0.1) * 1000);
+    }
+    this.outs = [...this.outs, ...(this.srcs || [])].filter((s) => s._t1 > now);
     this.srcs = []; this.src = null;
   }
 
   // route the deck through its key-lock pitch shifter (pitch = 1/rate cancels the vinyl-style pitch change)
   setKeylock(on) {
     if (!this.keyNode) return;
-    const wasPlaying = this.playing, resumeAt = this.ctx.currentTime + 0.06, resumePos = this.position(resumeAt);
+    const wasPlaying = this.playing, resumeAt = this.ctx.currentTime + 0.06;
     this.slip.disconnect();
     if (on) { this.slip.connect(this.keyNode); if (!this._keyWired) { this.keyNode.connect(this.low); this._keyWired = true; } }
     else this.slip.connect(this.low);
     this.keylock = on;
     this._syncPitch();
-    if (wasPlaying && this.track) this.play(resumeAt, resumePos);
+    if (wasPlaying && this.track) this.respawn(resumeAt);         // (keeps a cue jump that's still to come)
   }
   _syncPitch(at = this.ctx.currentTime) {
     if (this.keyNode) this.keyNode.parameters.get('pitch').setValueAtTime(this.keylock ? 1 / this.rate : 1, at);
@@ -200,15 +239,16 @@ export class Deck {
   setStem(name, on, at = this.ctx.currentTime) {
     const g = this.stemGain[name].gain;
     at = this.pre(at);
-    g.cancelScheduledValues(at); g.setValueAtTime(on ? 0 : 1, at); g.linearRampToValueAtTime(on ? 1 : 0, at + 0.012);
+    g.cancelScheduledValues(at); g.setTargetAtTime(on ? 1 : 0, at, 0.004);      // from wherever it is: no dip if unchanged
     const flip = () => { this.stemOn[name] = on; };
     if (at <= this.ctx.currentTime + 0.01) flip(); else setTimeout(flip, (at - this.ctx.currentTime) * 1000);
   }
 
   setRate(r) {
     const now = this.ctx.currentTime;
-    this.anchorPos = this.position(now); this.anchorCtx = now; this.rate = r;
-    for (const s of this.srcs || []) s.playbackRate.setValueAtTime(r, now);
+    this.anchorPos = this.position(now); this.anchorCtx = now;
+    this.rate = r;
+    for (const s of [...(this.srcs || []), ...this.outs]) s.playbackRate.setValueAtTime(r, now);
     this._syncPitch(now);
   }
 
@@ -227,10 +267,21 @@ export class Deck {
   }
 
   // --- FX (slip mode: the main track keeps running muted underneath) ---
-  _duck(at, dur) {
-    const t = this.pre(at), g = this.slip.gain;
-    g.setValueAtTime(1, t); g.linearRampToValueAtTime(0, t + 0.004);
-    g.setValueAtTime(0, t + dur - 0.004); g.linearRampToValueAtTime(1, t + dur);
+  // mute (or turn down to `level`) the main track from `at` for `dur`. Overlapping ducks are merged into one schedule
+  // (the lowest level wins), so a second roll inside a first one can't unmute the track halfway through
+  _duck(at, dur, level = 0) {
+    const now = this.ctx.currentTime, t0 = this.pre(at);
+    this.ducks = this.ducks.filter((d) => d[1] > now);
+    this.ducks.push([t0, t0 + dur, level]);
+    const g = this.slip.gain, R = 0.004;
+    const lvl = (t) => this.ducks.reduce((m, [a, b, l]) => (t >= a && t < b ? Math.min(m, l) : m), 1);
+    const ts = [...new Set(this.ducks.flat().filter((t, i) => i % 3 !== 2 && t > now))].sort((x, y) => x - y);
+    let cur = lvl(now);
+    g.cancelScheduledValues(now); g.setValueAtTime(cur, now);
+    for (const t of ts) {
+      const v = lvl(t);
+      if (v !== cur) { g.setValueAtTime(cur, t); g.linearRampToValueAtTime(v, t + R); cur = v; }
+    }
   }
 
   // repeat a `slice`-beat chunk for `beats` beats starting at ctx time `at`
@@ -321,8 +372,15 @@ export class Deck {
     if (!this.track) return;
     this.play(at, Math.max(0, Math.min(this.duration - 1, pos)));
   }
+  // new sources from ctx time `at` (stems just arrived), same timeline: the jumps still to come are scheduled again
+  respawn(at) {
+    if (!this.track || !this.playing) return;
+    const later = this.jumps.filter((j) => j.ctx > at);
+    this.play(at, this.position(at));
+    for (const j of later) this.play(j.ctx, j.pos);
+  }
   // ctx time of the next bar line
-  nextBarTime(at = this.ctx.currentTime + 0.05) { return this.timeOfBeat(Math.ceil(this.beatAt(at) / 4 - 1e-4) * 4); }
+  nextBarTime(at = this.ctx.currentTime + 0.05) { return this.timeOfBeat(Math.ceil(this.beatAt(at) / 4 - 1e-4) * 4, at - 1e-3); }
 
   // play the next `beats` of the track backwards (Pioneer-style reverse), slipping back in afterwards
   reverse(at, beats = 1) {
