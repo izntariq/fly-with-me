@@ -15,7 +15,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const S = {
   ws: null, hello: null, ctx: null, mixer: null, ears: null, synth: null, dj: null,
   brainView: null, raster: null, xy: null,
-  crate: [], crateNext: 0, style: 'desi', feed: { sugar: 0, bitter: 0 }, wind: 0,
+  crate: [], crateNext: 0, want: [null, null], style: 'desi', feed: { sugar: 0, bitter: 0 }, wind: 0,
   stats: { spikes: 0, frames: 0, load: 0, t: 0 }, nextGrid: 0, started: false, lastDrive: 0,
 };
 
@@ -51,8 +51,13 @@ function connect() {
   };
 }
 
+// what the app was built around: the server sends a hello on every connection, and a restart can bring another brain
+// (--flies, --connectome, a retrained brain); then every index the app holds (inputs, outputs, flies) is wrong
+const helloKey = (h) => JSON.stringify([h.flies || 1, h.connectome || 'flywire', h.n_neurons, h.n_connections,
+  h.inputs?.length, h.outputs?.length, h.trained?.synapses ?? 0]);
+
 async function onHello(h) {
-  if (S.hello) return;
+  if (S.hello) { if (helloKey(h) !== helloKey(S.hello)) brainChanged(); return; }    // same brain: a reconnect, carry on
   S.hello = h;
   const tb = h.trained;
   const nf = h.flies || 1;
@@ -82,7 +87,22 @@ function onFrame(f) {
   S.synth.addSpikes(out, S.ctx.currentTime);
 }
 
-function send(obj) { if (S.ws?.readyState === 1) S.ws.send(JSON.stringify(obj)); }
+// A different brain answered: stop driving it (and reading it) with this page's channel and neuron indices. Before the
+// start there's nothing to lose, so the page just reloads; mid-set the music plays on until you reload.
+function brainChanged() {
+  if (S.stale) return;
+  S.stale = true;
+  const ws = S.ws; ws.onclose = ws.onmessage = null; ws.close();
+  $('#st-conn').textContent = 'brain changed'; $('#st-conn').className = 'pill off';
+  if (!S.ctx) { location.reload(); return; }
+  const b = document.createElement('div'); b.id = 'stale';
+  b.innerHTML = '<span>The brain server changed (another brain, or another number of flies) — reload to play with it.</span>';
+  const go = document.createElement('button'); go.textContent = 'Reload'; go.onclick = () => location.reload();
+  b.append(go); document.body.append(b);
+  log('<b>the brain server changed</b>: the fly is no longer driven — reload the page');
+}
+
+function send(obj) { if (!S.stale && S.ws?.readyState === 1) S.ws.send(JSON.stringify(obj)); }
 
 // ---------------- crate & decks ----------------
 function renderCrate() {
@@ -104,12 +124,14 @@ function renderCrate() {
 }
 
 const inStyle = (t) => t.source === 'file' || S.style === 'all' || t.style === S.style;
+// (a released track that failed to decode again just now sits out for a minute: memory pressure passes)
+const usable = (t) => inStyle(t) && !(t.badUntil > performance.now());
 
 function pickNext(exclude) {
   for (let k = 0; k < S.crate.length; k++) {
     const t = S.crate[(S.crateNext + k) % S.crate.length];
     // kept within the crate, so a track added at crateNext is the next one up even after the crate grows
-    if (!exclude.includes(t) && inStyle(t)) { S.crateNext = (S.crateNext + k + 1) % S.crate.length; return t; }
+    if (!exclude.includes(t) && usable(t)) { S.crateNext = (S.crateNext + k + 1) % S.crate.length; return t; }
   }
   return null;
 }
@@ -122,6 +144,17 @@ function loadNext(i) {
 }
 
 function loadTrack(i, t, why = '') {
+  // a track whose audio was released (trimCrate) is decoded again first; a later load or preview of this deck wins
+  S.want[i] = t;
+  if (!t.buffer) {
+    // by the time it's decoded the deck may be on air, or lined up as the next transition's incoming: then leave it
+    revive(t).then((ok) => {
+      if (S.want[i] !== t) return;
+      if (S.mixer.airness(S.mixer.decks[i]) > 0.01 || S.dj?.pending) { S.want[i] = null; return; }
+      if (ok) loadTrack(i, t, why); else loadNext(i);
+    });
+    return;
+  }
   const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
   if (t.pendingAnalysis && other.track !== t) { applyAnalysis(t, t.pendingAnalysis); t.pendingAnalysis = null; }
   deck.load(t);
@@ -130,17 +163,32 @@ function loadTrack(i, t, why = '') {
   t.plays = (t.plays || 0) + 1;
   deck._manualEQ = false; deck.setEQ('low', 0); deck.setEQ('mid', 0); deck.setEQ('high', 0);
   log(`deck ${deck.name} ← "${t.name}" (${t.bpm.toFixed(1)} bpm${other.playing ? ', beat-matched to deck ' + other.name : ''})${why}`);
+  if (t.source === 'file') separate(t);
   renderCrate();
+  scheduleTrim();
 }
 
 // the fly's headphone preview: play a candidate from its drop in the off-air deck (heard only in the cue ear)
 function previewTrack(i, t) {
+  S.want[i] = t;
+  // (decoded again first if need be; by then the deck may have come on air, and a preview must never be heard)
+  if (!t.buffer) {
+    const a = S.dj?.aud, mine = () => a && S.dj.aud === a && a.cands[a.k] === t;
+    if (mine()) a.t0 = Infinity;                    // the fly's 5 s of listening start when it actually plays
+    revive(t).then((ok) => {
+      if (S.want[i] !== t || S.mixer.airness(S.mixer.decks[i]) >= 0.01) return;
+      if (ok) { previewTrack(i, t); if (mine()) { a.t0 = S.ctx.currentTime; a.acc = 0; a.n = 0; } }
+      else if (mine()) { a.cands.splice(a.k--, 1); S.dj.nextCandidate(); }   // unreadable: the next candidate
+    });
+    return;
+  }
   const deck = S.mixer.decks[i], other = S.mixer.decks[1 - i];
   deck.load(t);
   const drop = t.cues?.find((c) => c.name === 'drop');
   startSynced(deck, other, drop ? t.firstBeat + drop.beat * 60 / t.bpm : t.firstBeat);
   S.ears.resetHabit(i);
   renderCrate();
+  scheduleTrim();
 }
 
 // tracks the fly could play next on deck i: in style, not on a deck, least-played first (crate order breaks ties)
@@ -149,7 +197,7 @@ function candidates(i, n) {
   const pool = [];
   for (let k = 0; k < S.crate.length; k++) {
     const t = S.crate[(S.crateNext + k) % S.crate.length];
-    if (inStyle(t) && !onDecks.includes(t)) pool.push(t);
+    if (usable(t) && !onDecks.includes(t)) pool.push(t);
   }
   pool.sort((a, b) => (a.plays || 0) - (b.plays || 0));
   return pool.slice(0, n);
@@ -171,74 +219,191 @@ function startSynced(deck, other, startPos = null) {
 }
 
 // ---------------- stem separation for dropped tracks (web worker) ----------------
+// Only deck tracks keep stems (trimCrate), so a dropped track is split when it's loaded on a deck: the deck plays the
+// full mix until they're ready, then switches on a bar line. The worker holds the whole spectrogram (about 0.5 GB for
+// 4 minutes), so long mixes go without.
+const STEM_MAX_S = 12 * 60;
 let stemWorker = null, stemJobs = new Map(), stemId = 0;
 function separate(t) {
-  stemWorker ||= new Worker('js/stems-worker.js');
-  stemWorker.onmessage = (e) => {
-    const { id, progress, drums, music } = e.data, tr = stemJobs.get(id);
-    if (!tr) return;
-    if (progress != null) { tr.stemProgress = progress; return; }
-    const mk = (chs) => { const b = S.ctx.createBuffer(2, chs[0].length, tr.buffer.sampleRate); b.copyToChannel(chs[0], 0); b.copyToChannel(chs[1], 1); return b; };
-    tr.stems = { drums: mk(drums), music: mk(music) };
-    tr.stemProgress = null; stemJobs.delete(id);
-    log(`stems ready for "${tr.name}": drums and music can now be muted separately`);
-    // decks already playing it switch to stems on the next bar, seamlessly
-    for (const d of S.mixer.decks) if (d.track === tr && d.playing) d.respawn(d.nextBarTime());
-    renderCrate();
-  };
-  const id = ++stemId, b = t.buffer;
-  stemJobs.set(id, t); t.stemProgress = 0;
+  if (window.flyNoStems || t.stems || t.stemProgress != null || t.noStems || !t.buffer) return;   // tests skip it (CPU heavy)
+  const b = t.buffer;
+  if (b.duration > STEM_MAX_S) {
+    t.noStems = true;
+    log(`"${t.name}" runs ${fmt(b.duration)}: no stem separation over ${STEM_MAX_S / 60} minutes (it would need gigabytes)`);
+    return;
+  }
+  if (!stemWorker) {
+    const w = stemWorker = new Worker('js/stems-worker.js');
+    w.onmessage = (e) => { w.started = true; onStems(e); };
+    // the worker itself broke (it reports a failed job as a message): drop it with the job it was on (the oldest) and
+    // queue the rest on a fresh one, so no deck waits on "separating stems" forever. A worker that never got going
+    // (its script didn't load: the server was restarting) isn't the track's fault: all its jobs are queued again
+    w.onerror = (e) => {
+      if (stemWorker !== w) return;                 // a late error from a worker already replaced
+      w.terminate(); stemWorker = null;
+      const jobs = [...stemJobs.values()].map((j) => j.t), lost = w.started ? jobs.shift() : null;
+      stemJobs.clear();
+      for (const x of [lost, ...jobs]) if (x) x.stemProgress = null;
+      if (lost) { lost.noStems = true; log(`no stems for "${lost.name}": the separation failed (${safeName(e.message || 'worker error')})`); }
+      if (w.started) for (const x of jobs) if (S.mixer.decks.some((d) => d.track === x)) separate(x);
+      renderCrate();
+    };
+  }
+  const id = ++stemId;
+  stemJobs.set(id, { t, sr: b.sampleRate }); t.stemProgress = 0;
   const L = b.getChannelData(0).slice(), R = (b.numberOfChannels > 1 ? b.getChannelData(1) : b.getChannelData(0)).slice();
   stemWorker.postMessage({ id, L, R, sr: b.sampleRate }, [L.buffer, R.buffer]);
 }
+function onStems(e) {
+  const { id, progress, drums, music, error } = e.data, job = stemJobs.get(id);
+  if (!job) return;
+  const tr = job.t;
+  if (progress != null) { tr.stemProgress = progress; return; }
+  stemJobs.delete(id); tr.stemProgress = null;
+  if (error) { tr.noStems = true; log(`no stems for "${tr.name}": the separation failed (${safeName(error)})`); renderCrate(); return; }
+  const decks = S.mixer.decks.filter((d) => d.track === tr);
+  if (!decks.length) { renderCrate(); return; }                 // it left the deck meanwhile: split again when it's back
+  const mk = (chs) => { const b = S.ctx.createBuffer(2, chs[0].length, job.sr); b.copyToChannel(chs[0], 0); b.copyToChannel(chs[1], 1); return b; };
+  tr.stems = { drums: mk(drums), music: mk(music) };
+  log(`stems ready for "${tr.name}": drums and music can now be muted separately`);
+  // decks already playing it switch to stems on the next bar, seamlessly
+  for (const d of decks) if (d.playing) d.respawn(d.nextBarTime());
+  renderCrate();
+}
 
-async function addFiles(files) {
-  for (const f of files) {
-    if (!f.type.startsWith('audio') && !/\.(mp3|wav|ogg|flac|m4a|aac|aiff?)$/i.test(f.name)) continue;
-    log(`analysing "${safeName(f.name)}"…`);
-    try {
-      const t = await trackFromFile(S.ctx, f);
-      await withAnalysis(t, f);
-      const at = S.crate.length ? S.crateNext % S.crate.length : 0;
-      S.crate.splice(at, 0, t);                       // user tracks play next
-      log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}${t.gridSource ? ' · analysed beat grid + song structure' : ''}`);
-      if (!window.flyNoStems) separate(t);          // tests can skip stem separation (CPU heavy)
-      renderCrate();
-    } catch (e) { log(`could not decode "${safeName(f.name)}": ${e.message}`); }
+// ---------------- crate memory ----------------
+// Decoded audio is big (a 4-minute track: ~90 MB, ~270 MB with stems) and Safari reloads a page that holds a few GB.
+// So only tracks that can come up soon keep theirs: the decks' (with stems), the fly's audition, and the next ones it
+// would consider, decoded again ahead of time from the File (which stays). The rest keep their grid, analysis and
+// waveform. A track picked before it's back is decoded on load (loadTrack / previewTrack wait for it).
+const KEEP = 3;                                      // an audition's worth of candidates
+let trimTimer = 0;
+const reviving = new Map();
+function scheduleTrim() { clearTimeout(trimTimer); trimTimer = setTimeout(trimCrate, 1500); }
+function trimCrate() {
+  if (!S.mixer) return;
+  const onDeck = new Set(S.mixer.decks.map((d) => d.track));
+  const soon = new Set([...(S.dj?.aud?.cands || []), ...candidates(0, KEEP)]);
+  for (let k = 0, n = 0; k < S.crate.length && n < 2; k++) {       // and the next two loadNext would take
+    const t = S.crate[(S.crateNext + k) % S.crate.length];
+    if (inStyle(t) && !onDeck.has(t)) { soon.add(t); n++; }
+  }
+  for (const t of S.crate) {
+    if (!t.file || onDeck.has(t)) continue;         // demos are rendered, not decoded: they stay
+    t.stems = null; t.rev = null;
+    if (soon.has(t)) revive(t); else if (!reviving.has(t)) t.buffer = null;
+  }
+}
+function revive(t) {
+  if (t.buffer) return Promise.resolve(true);
+  if (!reviving.has(t)) reviving.set(t, decodeAgain(t).finally(() => reviving.delete(t)));
+  return reviving.get(t);
+}
+async function decodeAgain(t) {
+  let data;
+  try { data = await t.file.arrayBuffer(); } catch (e) {
+    // the file was moved or deleted since it was dropped
+    const k = S.crate.indexOf(t);
+    if (k >= 0) { S.crate.splice(k, 1); if (k < S.crateNext) S.crateNext--; }
+    log(`"${t.name}" can't be read any more (${safeName(e.message)}): taken out of the crate`);
+    renderCrate();
+    return false;
+  }
+  try {
+    t.buffer = await S.ctx.decodeAudioData(data);
+    if (t.pendingAnalysis && !S.mixer.decks.some((d) => d.track === t)) { applyAnalysis(t, t.pendingAnalysis); t.pendingAnalysis = null; }
+    return true;
+  } catch (e) {
+    // it decoded when it was dropped, so this is the moment (memory pressure), not the file: it sits out a minute
+    t.badUntil = performance.now() + 60000;
+    log(`"${t.name}" couldn't be decoded again just now (${safeName(e.message || 'decode error')}); trying another track`);
+    return false;
   }
 }
 
-// The server's analysis of a track (beat grid + song structure), found by the file's SHA-1. An unknown track is
-// uploaded for gentle background analysis and picked up later; it's applied only while no deck is playing it.
-async function withAnalysis(t, f, tries = 0) {
+// Dropped tracks play next, in the order they were dropped. The same recording twice (by SHA-1) is skipped: the fly
+// could mix a song into itself.
+const hashing = new Set();                          // being decoded now (two drops can overlap)
+async function addFiles(files) {
+  // each file goes in after the previous one of this drop (a second drop arriving meanwhile can't interleave it)
+  let last = null, k = 0;
   try {
-    const buf = await f.arrayBuffer(), sha = await sha1(buf);
-    t.sha = sha;
-    // a track already on a deck takes its analysis when it next leaves it (its beat grid can't jump mid-play)
-    const use = (a, quiet) => {
-      if (S.mixer.decks.some((d) => d.track === t)) t.pendingAnalysis = a;
-      else if (!applyAnalysis(t, a)) { log(`"${t.name}": analysis not used (${t.analysisRejected || 'too few beats'})`); return; }
-      if (!quiet) { log(`"${t.name}": beat grid + song structure analysed`); renderCrate(); }
-    };
-    const r = await fetch(`/analysis/${sha}`);
-    if (r.status === 200) { use(await r.json(), tries === 0); return; }
-    // the server has just started and is still hashing the library: ask again in a few seconds, in the background (the
-    // track goes into the crate meanwhile), before uploading anything
-    if (r.status === 202 && (await r.clone().json().catch(() => ({}))).status === 'indexing') {
-      if (tries < 60) setTimeout(() => withAnalysis(t, f, tries + 1), 3000);
-      return;
+    for (const f of files) {
+      if (!f.type.startsWith('audio') && !/\.(mp3|wav|ogg|flac|m4a|aac|aiff?)$/i.test(f.name)) continue;
+      const sha = await f.arrayBuffer().then(sha1).catch(() => null);
+      if (sha && (hashing.has(sha) || S.crate.some((t) => t.sha === sha) || S.mixer.decks.some((d) => d.track?.sha === sha))) {
+        log(`"${safeName(f.name)}" is already in the crate: skipped`);
+        continue;
+      }
+      if (sha) hashing.add(sha);
+      log(`analysing "${safeName(f.name)}"…`);
+      try {
+        const t = await trackFromFile(S.ctx, f);
+        t.sha = sha; t.file = f;
+        if (sha) await withAnalysis(t, f);
+        const at = last && S.crate.includes(last) ? S.crate.indexOf(last) + 1 : S.crate.length ? S.crateNext % S.crate.length : 0;
+        S.crate.splice(at, 0, t); last = t;
+        if (++k % 4 === 0) trimCrate();               // a big drop doesn't hold every file decoded until it's all in
+        log(`crate + "${t.name}" — ${t.bpm.toFixed(1)} bpm, ${t.key}${t.gridSource ? ' · analysed beat grid + song structure' : ''}`);
+        renderCrate();
+      } catch (e) { log(`could not decode "${safeName(f.name)}": ${safeName(e.message)}`); }
+      finally { hashing.delete(sha); }
     }
-    if (r.status === 404) {
-      const ext = (f.name.match(/\.[a-z0-9]+$/i) || ['.mp3'])[0];
-      await fetch(`/analysis/${sha}`, { method: 'POST', body: buf, headers: { 'X-Ext': ext } }).catch(() => {});
-    }
-    const poll = setInterval(async () => {
-      if (t.gridSource) return clearInterval(poll);
-      const q = await fetch(`/analysis/${sha}`).catch(() => null);
-      if (q?.status === 200) { clearInterval(poll); use(await q.json(), false); }
-      else if (!q || q.status === 404) clearInterval(poll);
-    }, 30000);
-  } catch (e) { /* no analysis: the in-browser grid and the listener flies' section sense stand in */ }
+  } finally { scheduleTrim(); }
+}
+
+// The server's analysis of a track (beat grid + song structure), found by the file's SHA-1:
+//   200 the analysis · 202 queued, or the server is still hashing its library · 404 unknown · 410 failed, for good
+// The first answer comes before the track goes into the crate; the rest is asked in the background. An unknown track
+// is uploaded for gentle background analysis once, and again only if the server lost it in a restart.
+async function withAnalysis(t, f) {
+  const r = await fetch(`/analysis/${t.sha}`).catch(() => null);
+  if (r?.status === 200) useAnalysis(t, await r.json(), true);
+  else pollAnalysis(t, f, r).catch(() => {});      // no analysis: the in-browser grid and the listener flies' section sense stand in
+}
+
+// a track on a deck takes its analysis when it next leaves it (its beat grid can't jump mid-play); a released one when
+// it's decoded again (the grid fit checks the audio)
+function useAnalysis(t, a, quiet) {
+  if (!t.buffer || S.mixer.decks.some((d) => d.track === t)) t.pendingAnalysis = a;
+  else if (!applyAnalysis(t, a)) { log(`"${t.name}": analysis not used (${t.analysisRejected || 'too few beats'})`); return; }
+  if (!quiet) { log(`"${t.name}": beat grid + song structure analysed`); renderCrate(); }
+}
+
+async function pollAnalysis(t, f, r) {
+  const url = `/analysis/${t.sha}`, ext = (f.name.match(/\.[a-z0-9]+$/i) || ['.mp3'])[0];
+  // hadIt: since the upload the server had it queued, or was away; a 404 after that means it restarted and lost it
+  let uploads = 0, sendFails = 0, fails = 0, indexing = 0, hadIt = false;
+  const failed = () => log(`"${t.name}": the server's analysis failed; the in-browser beat grid stays`);
+  for (;;) {
+    let wait = 30000;
+    if (!r || r.status >= 500) {                    // away (restarting?): keep asking for a while
+      if (++fails > 20) return;
+      hadIt ||= uploads > 0;
+    } else if (r.status === 200) { useAnalysis(t, await r.json(), false); return; }
+    else if (r.status === 410) { failed(); return; }
+    else if (r.status === 202) {
+      fails = 0; hadIt ||= uploads > 0;
+      // still hashing the library: ask again shortly, before uploading anything
+      if ((await r.json().catch(() => ({}))).status === 'indexing' && indexing++ < 60) wait = 3000;
+    } else if (r.status === 404 && (!uploads || (hadIt && uploads < 2))) {
+      fails = 0;
+      const p = await upload(url, f, ext);
+      if (p?.status === 410) { failed(); return; }
+      if (p && !p.ok) { log(`"${t.name}": not uploaded for analysis (the server answered ${p.status})`); return; }
+      if (p) { uploads++; hadIt = false; } else if (++sendFails > 3) return;
+    } else return;                                  // a 404 right after the upload: this server doesn't analyse tracks
+    await new Promise((ok) => setTimeout(ok, wait));
+    if (t.gridSource || (!S.crate.includes(t) && !S.mixer.decks.some((d) => d.track === t))) return;   // done, or gone
+    r = await fetch(url).catch(() => null);
+  }
+}
+
+// one upload at a time: each holds the whole file in memory
+let uploading = Promise.resolve();
+function upload(url, f, ext) {
+  return (uploading = uploading.then(async () => fetch(url, { method: 'POST', body: await f.arrayBuffer(), headers: { 'X-Ext': ext } }))
+    .catch(() => null));
 }
 
 // ---------------- start ----------------
@@ -249,7 +414,8 @@ async function start() {
   // Safari can suspend / interrupt audio (sleep, Bluetooth switch, a call): offer a one-tap resume instead of silence
   const resume = () => ctx.resume().then(() => document.querySelector('#resume')?.remove()).catch(() => {});
   ctx.onstatechange = () => {
-    if (ctx.state === 'running' || document.querySelector('#resume')) return;
+    if (ctx.state === 'running') { document.querySelector('#resume')?.remove(); return; }   // it came back on its own
+    if (document.querySelector('#resume')) return;
     const b = document.createElement('button'); b.id = 'resume'; b.textContent = '▶ audio paused by the browser: tap to resume';
     Object.assign(b.style, { position: 'fixed', left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 99, fontSize: '15px', padding: '10px 18px' });
     b.onclick = resume; document.body.append(b);
@@ -269,7 +435,11 @@ async function start() {
     if ((S.hello.flies || 1) >= 2) S.dj.setListeners(S.hello.trained.readout, S.hello.outputs);
     else S.dj.setReadout(S.hello.trained.readout, S.hello.outputs);
   }
-  if ((S.hello.flies || 1) >= 2) S.ears.listenRaw();
+  if ((S.hello.flies || 1) >= 2) {
+    S.ears.listenRaw();
+    // each listener fly hears its own deck, raw: there's no cue / room choice to make
+    const er = $('#ears-room'); er.disabled = true; er.parentElement.title = 'with two or three flies each listener fly hears its own deck, so there is no room mix to choose';
+  }
   if ((S.hello.flies || 1) >= 2 && S.hello.sections) {
     S.dj.setSections(S.hello.sections, S.hello.outputs);
     log(`section sense v2: the listener flies' ${S.hello.sections.groups.length} output-neuron types → intro / main / breakdown / outro, on each deck's bar grid`);
@@ -288,21 +458,22 @@ async function start() {
     setTimeout(() => { S.mc.last = -1e9; S.dj.shout('hype'); }, Math.max(0, (Td - now) * 1000));
   };
   S.dj.onLoadNext = loadNext;
+  S.dj.loadPending = (i) => !!S.want[i] && S.want[i] !== S.mixer.decks[i].track;   // a load still decoding its track
   S.dj.onArrive = (deck, { snap, at }) => {
     if (!S.tempo || !$('#follow').checked || !deck.track) return;
-    const bpm = styleTempo(deck.track.bpm);
+    const bpm = styleTempo(S.mixer.tempoOf(deck.track));    // its own speed in the set's frame (a half-time track: ×2)
     if (Math.abs(bpm / S.tempo.base - 1) < 0.005) return;
     if (snap) {
       // tempo jumps with the cut, on the beat the new track lands
-      setTimeout(() => { S.tempo.base = S.tempo.cur = bpm; S.tempo.glideTo = null; log(`tempo → ${bpm.toFixed(1)} BPM with the cut ("${deck.track.name}")`); },
-        Math.max(0, (at - S.ctx.currentTime) * 1000));
+      S.tempo.snap = { bpm, at, name: deck.track.name };     // applied by the control loop when the audio clock gets there
     } else {
       S.tempo.glideTo = bpm;
       log(`tempo journey → drifting toward ${bpm.toFixed(1)} BPM ("${deck.track.name}")`);
     }
   };
   S.dj.picker = { candidates, preview: previewTrack, choose: (i, t, why) => loadTrack(i, t, why) };
-  mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5) loadNext(i); }; });
+  // (a deck that ends at the fader's midpoint, e.g. mid double drop, leaves the other one playing: no reload there)
+  mixer.decks.forEach((d, i) => { d.onEnded = () => { log(`deck ${d.name} track ended`); if (mixer.airness(d) > 0.5 + 1e-6) loadNext(i); }; });
   buildMoves();
   bindDeckUI();
   if (await mixer.initKeylock()) mixer.setKeylock($('#keylock').checked);
@@ -322,13 +493,27 @@ async function start() {
   loadNext(1);
   log('the fly is listening: left ear on deck A, right ear on deck B');
   renderCrate();
-  setInterval(control, 25);
+  startClock(control, 25);
   requestAnimationFrame(anim);
   initMidi();
   for (const job of jobs) { S.crate.push(await job()); renderCrate(); }
 }
 
+// your tempo change wins over the holds that keep scheduled moves on the beat (they may land off it: your call)
+function manualTempo() { S.dj.holdTempoUntil = 0; S.perf.holdUntil = 0; S.tempo.snap = null; }
+
 // ---------------- control loop (40 Hz) ----------------
+// ticked from a worker's timer: browsers throttle a hidden page's own timers (WebKit down to once a second, even while
+// it plays audio: a background tab, or a window covered by the full-screen visualiser), not a worker's
+function startClock(f, ms) {
+  try {
+    const url = URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), ${ms});`], { type: 'text/javascript' }));
+    const w = new Worker(url);
+    w.onmessage = () => f();
+    w.onerror = () => { w.terminate(); setInterval(f, ms); };
+    S.clock = w;
+  } catch (e) { setInterval(f, ms); }
+}
 let lastCtl = performance.now();
 function control() {
   const now = performance.now(), dt = Math.min(0.2, (now - lastCtl) / 1000); lastCtl = now;
@@ -351,14 +536,22 @@ function control() {
 
   // master tempo (your setting + the fly's ride), glided so changes sound like riding the pitch fader
   if (S.tempo) {
-    if (S.tempo.glideTo) {                     // tempo journey toward the on-air track's own BPM (~20 s)
+    // the tempo jumps with a cut on the beat the new track lands (by the audio clock: a hidden page's timers lag)
+    const sn = S.tempo.snap;
+    if (sn && S.ctx.currentTime >= sn.at) {
+      S.tempo.snap = null; S.tempo.base = S.tempo.cur = sn.bpm; S.tempo.glideTo = null;
+      log(`tempo → ${sn.bpm.toFixed(1)} BPM with the cut ("${sn.name}")`);
+    }
+    // held while a transition is lined up, or while a move has cuts / restores fixed on the audio clock: a rate change
+    // would move the bar lines away from them. The tempo fader and the glide stay put too, so they go on from there
+    const held = S.ctx.currentTime < Math.max(S.dj.holdTempoUntil || 0, S.perf.holdUntil || 0);
+    if (S.tempo.glideTo && !held) {            // tempo journey toward the on-air track's own BPM (~20 s)
       S.tempo.base += (S.tempo.glideTo - S.tempo.base) * Math.min(1, dt / 20);
       if (Math.abs(S.tempo.glideTo - S.tempo.base) < 0.05) { S.tempo.base = S.tempo.glideTo; S.tempo.glideTo = null; }
     }
     const ride = S.dj.auto && $('#ride').checked ? S.dj.tempoOffset : 0;
     const target = S.tempo.base * (1 + ride);
-    S.tempo.cur += (target - S.tempo.cur) * Math.min(1, dt / 0.6);
-    const held = S.ctx.currentTime < (S.dj.holdTempoUntil || 0);   // a transition is lined up on the current tempo
+    if (!held) S.tempo.cur += (target - S.tempo.cur) * Math.min(1, dt / 0.6);
     if (!held && Math.abs(S.tempo.cur - S.tempo.applied) > 0.02) { S.mixer.applyTempo(S.tempo.cur); S.tempo.applied = S.tempo.cur; }
   }
   // follow the on-air deck's key
@@ -405,9 +598,10 @@ function bindDeckUI() {
              habit: $('.habit div', root), play: $('.btn-play', root) };
     d.ui.play.onclick = () => { if (d.playing) d.stop(); else if (d.track) startSynced(d, S.mixer.decks[1 - i]); else loadNext(i); };
     $('.btn-next', root).onclick = () => loadNext(i);
-    // fix a wrong tempo detection: rescale the beat grid (the first beat stays put)
+    // fix a wrong tempo detection: rescale the beat grid (the first beat stays put). Not on an analysed track: its grid
+    // is All-In-One's downbeats, and its sections, exit bar and cues are counted in its bars (anim greys the buttons)
     const rescale = (f) => {
-      const t = d.track; if (!t) return;
+      const t = d.track; if (!t || t.gridSource) return;
       t.bpm *= f;
       if (t.cues) t.cues = t.cues.map((c) => ({ ...c, beat: Math.round(c.beat * f) }));
       t.energy = analyzeEnergy(t.buffer, t.bpm, t.firstBeat).energy;
@@ -418,6 +612,8 @@ function bindDeckUI() {
     };
     $('.btn-half', root).onclick = () => rescale(0.5);
     $('.btn-double', root).onclick = () => rescale(2);
+    d.ui.oct = [$('.btn-half', root), $('.btn-double', root)];
+    for (const b of d.ui.oct) b.dataset.tip = b.title;
     for (const band of ['high', 'mid', 'low']) {
       const inp = $(`.eq-${band}`, root);
       inp.oninput = () => { d._manualEQ = true; d.setEQ(band, +inp.value); };
@@ -530,7 +726,7 @@ function bindPerformance() {
   };
   $('#persona-tag').textContent = STYLES.fly.tagline;
   // tempo
-  const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; };
+  const setBase = (b) => { if (!S.tempo) return; S.tempo.base = Math.max(70, Math.min(180, b)); S.tempo.glideTo = null; manualTempo(); };
   $('#bpm').oninput = (e) => setBase(+e.target.value);
   $('#keylock').onchange = (e) => { S.mixer?.setKeylock(e.target.checked); log(`key lock ${e.target.checked ? 'on: tempo changes keep the pitch' : 'off: tempo moves the pitch, like vinyl'}`); };
   $('#bpm-down').onclick = () => setBase(S.tempo.base - 1);
@@ -547,7 +743,9 @@ function bindPerformance() {
     if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     const k = e.key.toLowerCase();
     if (k in cueKeys && S.started) { const [d, c] = cueKeys[k]; S.perf.hotCue(S.mixer.decks[d], c); return; }
-    if ((k === '-' || k === '=') && S.tempo) { S.tempo.base += (k === '=' ? 1 : -1) * (e.shiftKey ? 0.1 : 1); S.tempo.glideTo = null; return; }
+    // by key position: with Shift, e.key is '_' / '+'
+    const up = ['Equal', 'NumpadAdd'].includes(e.code) || e.key === '=' || e.key === '+', down = ['Minus', 'NumpadSubtract'].includes(e.code) || e.key === '-' || e.key === '_';
+    if ((up || down) && S.tempo) { S.tempo.base += (up ? 1 : -1) * (e.shiftKey ? 0.1 : 1); S.tempo.glideTo = null; manualTempo(); return; }
     const act = keyMap[k];
     if (act) { e.preventDefault(); runAct(act, e.shiftKey); lightPad(act.startsWith('build') ? 'build' : act.split(':')[1] || act); }
   });
@@ -579,6 +777,12 @@ function anim() {
     setStyle(d.ui.habit, 'width', `${(S.ears.habit[i] * 100).toFixed(0)}%`);
     setText(d.ui.play, d.playing ? '■' : '▶');
     for (const b of d.ui.stems) { b.disabled = !d.hasStems; b.classList.toggle('off', !d.stemOn[b.dataset.stem]); }
+    // greyed rather than disabled: some browsers show no tooltip on a disabled button, and this one says why
+    const fixed = !!d.track?.gridSource;
+    for (const b of d.ui.oct) if (b.classList.contains('locked') !== fixed) {
+      b.classList.toggle('locked', fixed); b.setAttribute('aria-disabled', fixed);
+      b.title = fixed ? 'this track\'s tempo comes from its analysed beat grid (its sections and exit are counted on it)' : b.dataset.tip;
+    }
     setText(d.ui.stemStatus, d.hasStems ? '' : d.track?.stemProgress != null ? `separating stems ${Math.round(d.track.stemProgress * 100)}%` : d.track ? 'no stems' : '');
     d.ui.root.classList.toggle('onair', mx.airness(d) > 0.5);
     if (!d._manualFilter && document.activeElement !== d.ui.filter) d.ui.filter.value = d.filterVal;
@@ -745,7 +949,7 @@ function bindGlobalUI() {
   });
   $('#btn-rec').onclick = toggleRecord;
   $('#btn-export').onclick = exportSet;
-  $('#crate-style').onchange = (e) => { S.style = e.target.value; S.crateNext = 0; renderCrate(); log(`crate style → ${S.style}; the fly picks from it at the next track change`); };
+  $('#crate-style').onchange = (e) => { S.style = e.target.value; S.crateNext = 0; renderCrate(); scheduleTrim(); log(`crate style → ${S.style}; the fly picks from it at the next track change`); };
   $('#midi-out').onchange = (e) => { S.synth.midi = S.midiOuts?.get(e.target.value) || null; };
 }
 
@@ -783,8 +987,14 @@ function exportSet() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/markdown' }));
   a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
-  a.click();
+  download(a);
   log('📝 set exported: tracklist, move counts and full log');
+}
+
+// a blob download, its URL freed once the download has surely started (a recording holds the whole set in memory)
+function download(a) {
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10 * 60000);   // (Safari may first ask whether to allow downloads)
 }
 
 let rec = null;
@@ -800,7 +1010,7 @@ function toggleRecord() {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
     a.download = `fly-brain-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${/mp4/.test(rec.mimeType) ? 'm4a' : 'webm'}`;   // Safari records mp4
-    a.click();
+    download(a);
     S.mixer.out.disconnect(dest); rec = null;
     exportSet();
     $('#btn-rec').textContent = '● Record set'; $('#rec-status').textContent = 'saved';

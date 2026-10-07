@@ -6,6 +6,10 @@ Browser -> server   {"type": "drive", "levels": {channel_name: 0..1, ...}, "leve
                     {"type": "reset"}
 Server  -> browser  {"type": "hello", ...}  once, describes inputs/outputs and how many flies
                     {"type": "frame", ...}  every FRAME_MS of brain time; "outs": one spike list per fly
+GET  /analysis/<sha1>   200 the track's analysis; 202 {"status": "queued" | "indexing"}: ask again later;
+                        404 unknown: upload it; 410 {"status": "failed"}: terminal, don't upload it again
+POST /analysis/<sha1>   the audio file, analysed in the background: 202 queued; the GET answer if it needs no upload
+                        (known, queued, indexing, failed); 400 hash mismatch; 413 over 400 MB; 503 no analyser installed
 
 With --flies 2 there is one listener fly per deck: each hears its own deck in both ears (how it was trained).
 With --flies 3 a third, DJ fly is chained after them: it hears the listeners, not the music. Twelve DJ-relevant
@@ -15,15 +19,22 @@ descending neurons of listener A drive the 12 Johnston's-organ bands of its LEFT
 from __future__ import annotations
 
 import argparse
-from urllib.parse import urlparse
 import asyncio
+import contextlib
+import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
+import aiohttp
 import numpy as np
 from aiohttp import WSMsgType, web
 
@@ -40,6 +51,11 @@ RUNAWAY_SPIKES = 12_000     # per frame (= 600k spikes/s); seizure-like state ->
 LISTENER_TAPS = ["DNp55", "DNge145", "DNge113", "DNp12", "DNg24", "DNg29", "DNp01", "DNp02", "DNg84", "DNp11",
                  "DNg99", "DNb05"]
 TAP_FULL_HZ = 40.0          # a tapped neuron firing this fast drives its band fully
+SEND_QUEUE = 4              # frames waiting for one client; a client further behind loses its oldest frames
+# a dropped track uploaded for analysis. The analyser takes tracks up to 20 min, and 20 min of 24-bit 48 kHz stereo WAV
+# is ~350 MB, so the cap stays at 400 MB. Uploads stream to disk, so it bounds disk use, not memory
+MAX_UPLOAD = 400 * 1024 * 1024
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 log = logging.getLogger("flybrain")
 
 
@@ -168,7 +184,9 @@ class FlyServer:
             ids = [x for x in ann.index[(ann.cell_type == typ) & (ann.super_class == "descending")] if x in self.brain.id2idx]
             self.taps.append((ear_bands[i].split(":")[1], np.array([self.brain.id2idx[x] for x in ids], np.int64)))
         self.tap_rate = np.zeros((2, len(self.taps)))  # smoothed tap rates for listeners A and B
-        self.clients: set[web.WebSocketResponse] = set()
+        self.clients: dict[web.WebSocketResponse, asyncio.Queue] = {}     # each client's outgoing frames
+        self.driver = None                              # the client that last sent "drive"
+        self.reset_pending = False                      # a page asked for a reset; done between frames
         self.runaway = [0] * len(self.brains)
         self.pokes = [[] for _ in self.brains]
         self.analyses = Analyses()          # (neuron idx, Hz, until) stimulation from the visualiser
@@ -251,6 +269,12 @@ class FlyServer:
                 await asyncio.sleep(0.1)
                 wall0, brain0 = time.perf_counter(), clock.t_ms
                 continue
+            if self.reset_pending:
+                # here, between runs: resetting from the websocket handler could land in the middle of a serial-mode
+                # run (it steps the same arrays in a worker thread) or interleave with a worker's pipe traffic
+                self.reset_pending = False
+                for b in self.brains:
+                    b.reset()
             for k in range(len(self.brains)):
                 self.apply_drive(k)             # fly 3's levels were set from the listeners last frame
             t_start = clock.t_ms
@@ -290,7 +314,12 @@ class FlyServer:
                 "type": "frame", "t": round(t_start, 1), "n": int(total), "out": outs[0], "outs": outs,
                 "viz": vizs[0], "vizs": vizs, "load": round(cost * 1000 / FRAME_MS, 2), "reset": reset,
             })
-            await asyncio.gather(*(self._send(ws, msg) for ws in list(self.clients)))
+            # each client's own sender task takes it from there: one that stops reading (a paused tab, a debugger)
+            # can't hold up the brain, it just misses frames
+            for q in self.clients.values():
+                if q.full():
+                    q.get_nowait()
+                q.put_nowait(msg)
 
             # keep brain time locked to wall time; if we fall behind, don't try to catch up
             ahead = (clock.t_ms - brain0) / 1000 - (time.perf_counter() - wall0)
@@ -299,26 +328,21 @@ class FlyServer:
             elif ahead < -0.25:
                 wall0, brain0 = time.perf_counter(), clock.t_ms
 
-    async def _send(self, ws, msg):
+    async def _sender(self, ws, q):
+        """One client's frames, sent in order; only this task waits when its socket backs up."""
         try:
-            await ws.send_str(msg)
-        except Exception:
-            self.clients.discard(ws)
-
-    @staticmethod
-    def _check_origin(request, what):
-        # pages from other sites may not drive the brain or upload files (a browser sends their Origin)
-        origin = request.headers.get("Origin")
-        if origin and urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", request.host.split(":")[0]):
-            log.warning("refused %s from %s", what, origin)
-            raise web.HTTPForbidden()
+            while True:
+                await ws.send_str(await q.get())
+        except Exception:                               # the socket is gone: stop queueing for it
+            self.clients.pop(ws, None)
 
     async def ws_handler(self, request):
-        self._check_origin(request, "a websocket")
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=1 << 20)
         await ws.prepare(request)
         await ws.send_str(json.dumps(self.hello()))
-        self.clients.add(ws)
+        q = asyncio.Queue(SEND_QUEUE)
+        sender = asyncio.create_task(self._sender(ws, q))
+        self.clients[ws] = q
         log.info("client connected (%d)", len(self.clients))
         try:
             async for msg in ws:
@@ -326,6 +350,7 @@ class FlyServer:
                     continue
                 d = json.loads(msg.data)
                 if d.get("type") == "drive":
+                    self.driver = ws
                     for fk, key in enumerate(("levels", "levels2", "levels3")[:len(self.brains)]):
                         for k, v in d.get(key, {}).items():
                             if fk == 2 and k.startswith("ear"):
@@ -343,12 +368,15 @@ class FlyServer:
                         self.pokes[k].append((idx, hz, time.perf_counter() + ms / 1000))
                         log.info("poke: fly %d, %d neurons at %.0f Hz for %.0f ms", k + 1, len(idx), hz, ms)
                 elif d.get("type") == "reset":
-                    for b in self.brains:
-                        b.reset()
+                    self.reset_pending = True
         finally:
-            self.clients.discard(ws)
-            if not self.clients:
+            sender.cancel()
+            self.clients.pop(ws, None)
+            if ws is self.driver or not self.clients:
+                # the page that drove the flies has gone: they stop hearing its last spectrum, even while the
+                # visualiser stays connected
                 self.levels = [{k: 0.0 for k in lv} for lv in self.levels]
+                self.driver = None
             log.info("client disconnected (%d)", len(self.clients))
         return ws
 
@@ -359,19 +387,55 @@ class FlyServer:
         a = self.analyses.get(request.match_info["sha"])
         if a is None:
             raise web.HTTPNotFound()
+        if a == "failed":                                  # terminal: the page shouldn't upload it again
+            return web.json_response({"status": a}, status=410)
         if a in ("queued", "indexing"):                    # indexing: the library isn't hashed yet, ask again shortly
             return web.json_response({"status": a}, status=202)
         return web.json_response(a)
 
     async def analysis_post(self, request):
-        self._check_origin(request, "an upload")
-        sha = request.match_info["sha"]
-        data = await request.read()
-        import hashlib
-        if hashlib.sha1(data).hexdigest() != sha:
-            raise web.HTTPBadRequest(text="hash mismatch")
-        ext = re.sub(r"[^.a-z0-9]", "", (request.headers.get("X-Ext") or ".mp3").lower())[:6] or ".mp3"
-        self.analyses.submit(sha, data, ext)
+        sha, an = request.match_info["sha"], self.analyses
+        if not an.py.exists():                             # nothing could analyse it: don't take the upload at all
+            raise web.HTTPServiceUnavailable(text="no track analyser installed")
+        if not an.submit(sha):                             # known, queued, failed or still indexing: no upload needed
+            return await self.analysis_get(request)
+        ext = "." + (re.sub(r"[^a-z0-9]", "", (request.headers.get("X-Ext") or "").lower())[:5] or "mp3")
+        tmp, f, ok = an.up / f"{sha}.part", None, False
+        try:
+            if (request.content_length or 0) > MAX_UPLOAD:
+                raise web.HTTPRequestEntityTooLarge(MAX_UPLOAD, request.content_length)
+            # hashed and written a few MB at a time in a worker thread: on the event loop a 100-400 MB WAV stops the
+            # frames for half a second, and whole uploads held in memory add up when a batch of files is dropped
+            an.up.mkdir(parents=True, exist_ok=True)
+            f, h, size, pend, held = open(tmp, "wb"), hashlib.sha1(), 0, [], 0
+            try:
+                async for chunk in request.content.iter_any():
+                    size += len(chunk)
+                    if size > MAX_UPLOAD:
+                        raise web.HTTPRequestEntityTooLarge(MAX_UPLOAD, size)
+                    pend.append(chunk)
+                    held += len(chunk)
+                    if held >= 1 << 22:
+                        await asyncio.to_thread(_feed, f, h, pend)
+                        pend, held = [], 0
+            except (ConnectionResetError, aiohttp.ClientPayloadError):
+                # the page went away mid-upload (a reload, a closed tab): normal, not an error with a traceback
+                log.info("upload of %s cut off by the page", sha[:10])
+                return web.Response(status=499)
+            await asyncio.to_thread(_feed, f, h, pend)
+            await asyncio.to_thread(f.close)
+            if h.hexdigest() != sha:
+                raise web.HTTPBadRequest(text="hash mismatch")
+            path = an.up / f"{sha}{ext}"
+            os.replace(tmp, path)
+            an.start(sha, path)
+            ok = True
+        finally:
+            if f is not None:
+                f.close()
+            if not ok:                                     # refused or cut off: the next upload may try again
+                tmp.unlink(missing_ok=True)
+                an.busy.discard(sha)
         return web.json_response({"status": "queued"}, status=202)
 
     async def xyz_handler(self, request):
@@ -391,13 +455,23 @@ class Analyses:
         self.busy = set()
         self.indexing = True
         self.py = ROOT / ".venv-allin1" / "bin" / "python"
-        import threading
         self.idx_lock = threading.Lock()                  # the index (brief)
         self.run_lock = threading.Lock()                  # one analysis at a time (minutes)
+        self._sweep()
         threading.Thread(target=self._index_library, daemon=True).start()
 
+    def _sweep(self):
+        # a server stopped mid-upload leaves <sha>.part, and one stopped with uploads waiting for their turn leaves
+        # their audio. Only stale ones go (over 6 h old: no run takes over 15 min), since a second server (tests, on
+        # another port) shares this folder and may be mid-upload itself
+        if not self.up.exists():
+            return
+        cutoff = time.time() - 6 * 3600
+        for p in self.up.iterdir():
+            if p.is_file() and p.suffix not in (".json", ".failed") and p.stat().st_mtime < cutoff:
+                p.unlink(missing_ok=True)
+
     def _index_library(self):
-        import hashlib
         try:
             known = set(self.index.values())
             files = {}                                    # slug -> file: two different files must not share a slug
@@ -422,34 +496,78 @@ class Analyses:
             self.indexing = False
         log.info("track analyses: %d library tracks indexed", len(self.index))
 
+    @staticmethod
+    def _read(p: Path):
+        try:
+            a = json.loads(p.read_text())
+        except (OSError, ValueError):                     # missing, or cut short by a run that died writing it
+            return None
+        return {k: a.get(k) for k in ("bpm", "beats", "downbeats", "segments")} if isinstance(a, dict) else None
+
     def get(self, sha: str):
+        """The analysis, or "queued" / "indexing" (ask again), "failed" (terminal), None (unknown: upload it)."""
         slug = self.index.get(sha)
-        for p in ([self.lib / "allin1" / f"{slug}.json"] if slug else []) + [self.up / f"{sha}.json"]:
-            if p.exists():
-                a = json.loads(p.read_text())
-                return {k: a.get(k) for k in ("bpm", "beats", "downbeats", "segments")}
-        return "queued" if sha in self.busy else "indexing" if self.indexing else None
+        if slug and (a := self._read(self.lib / "allin1" / f"{slug}.json")):
+            return a
+        if sha in self.busy:                              # until its run has ended, its result may be half-written
+            return "queued"
+        if a := self._read(self.up / f"{sha}.json"):
+            return a
+        if (self.up / f"{sha}.failed").exists():
+            return "failed"
+        return "indexing" if self.indexing else None
 
-    def submit(self, sha: str, data: bytes, ext: str):
-        if not self.py.exists() or sha in self.busy or self.get(sha) is not None:    # known, queued, or still indexing
-            return
-        self.up.mkdir(parents=True, exist_ok=True)
-        path = self.up / f"{sha}{ext}"
-        path.write_bytes(data)
+    def submit(self, sha: str) -> bool:
+        """Claim sha for analysis; the caller then stores the upload and calls start(), or drops it from busy. Refused
+        with no analyser, or when sha is known, queued, failed before (never retried) or the library is indexing."""
+        if not self.py.exists() or self.get(sha) is not None:
+            return False
         self.busy.add(sha)
-        import subprocess
-        import threading
+        return True
 
-        def run():
-            with self.run_lock:                           # one analysis at a time
-                try:
-                    subprocess.run(["nice", "-n", "12", str(self.py), str(ROOT / "tools" / "label_one.py"),
-                                    str(path), str(self.up)], capture_output=True, timeout=15 * 60)
-                except subprocess.TimeoutExpired:
-                    log.warning("track analysis %s: timed out", sha[:10])
+    def start(self, sha: str, path: Path):
+        threading.Thread(target=self._analyse, args=(sha, path), daemon=True).start()
+
+    def _analyse(self, sha: str, path: Path):
+        out, why, killed = self.up / f"{sha}.json", "crashed", False
+        try:
+            try:
+                with self.run_lock:                       # one analysis at a time
+                    try:
+                        r = subprocess.run(["nice", "-n", "12", str(self.py), str(ROOT / "tools" / "label_one.py"),
+                                            str(path), str(self.up)], capture_output=True, timeout=15 * 60)
+                        why = r.stderr.decode(errors="replace").strip()[-2000:] or f"exit code {r.returncode}"
+                        # killed by a signal: Ctrl-C on the server reaches the analyser too (same process group), and
+                        # macOS kills under memory pressure. Not the track's fault, so not marked failed for good
+                        killed = r.returncode < 0
+                    except subprocess.TimeoutExpired:
+                        why = "timed out after 15 min"
+                    except OSError as e:
+                        why = f"could not start the analyser: {e}"
+                    finally:
+                        # the audio was only needed for this. label_one runs All-In-One in self.up, which keeps the
+                        # stems (demix/htdemucs/<stem>/) and spectrogram (spec/<stem>.npy) if it dies or is killed
+                        path.unlink(missing_ok=True)
+                        shutil.rmtree(self.up / "demix" / "htdemucs" / path.stem, ignore_errors=True)
+                        (self.up / "spec" / f"{path.stem}.npy").unlink(missing_ok=True)
+                        for d in ("demix/htdemucs", "demix", "spec"):
+                            with contextlib.suppress(OSError):
+                                (self.up / d).rmdir()     # only if empty
+            finally:
+                ok = self._read(out) is not None
+                if not ok and not killed:
+                    # terminal: GET answers 410 and it is never analysed again (delete the marker to retry)
+                    out.unlink(missing_ok=True)
+                    (self.up / f"{sha}.failed").write_text(why + "\n")
+        finally:
             self.busy.discard(sha)
-            log.info("track analysis %s: %s", sha[:10], "done" if (self.up / f"{sha}.json").exists() else "failed")
-        threading.Thread(target=run, daemon=True).start()
+        log.info("track analysis %s: %s", sha[:10], "done" if ok else "stopped" if killed else f"failed ({why.splitlines()[-1]})")
+
+
+def _feed(f, h, chunks):
+    for c in chunks:
+        h.update(c)
+        f.write(c)
 
 
 def versioned_page(name: str) -> str:
@@ -473,8 +591,55 @@ async def no_stale(request, response):
         response.headers["Cache-Control"] = "no-cache"
 
 
-def make_app(server: FlyServer) -> web.Application:
-    app = web.Application(client_max_size=400 * 1024 * 1024)      # dropped tracks can be uploaded for analysis
+def _hostname(value: str | None) -> str | None:
+    """The host name in a Host header ("localhost:8765", "[::1]:8765") or an Origin ("http://localhost:8765")."""
+    if not value or "@" in value:
+        return None
+    try:
+        return urlparse(value if "://" in value else "//" + value).hostname
+    except ValueError:                                     # e.g. an unclosed [IPv6 bracket
+        return None
+
+
+def host_guard(host: str):
+    """Requests must name this machine in Host, and in Origin when a page sends one. Comparing Origin with Host alone
+    isn't enough: a page on another site whose name is re-pointed at 127.0.0.1 (DNS rebinding) sends its own name in
+    both. Bound to every interface, Host may also be any IP address (a page can't rebind an IP literal), so a phone can
+    use http://<this Mac's IP>:8765; reaching it by a name (mymac.local) needs --host <that name>."""
+    own = host.strip("[]").lower()
+    anywhere = own in ("", "0.0.0.0", "::")
+
+    def allowed(name):
+        if name is None:
+            return False
+        if name in LOCAL_HOSTS or name == own:
+            return True
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            return False
+        return anywhere
+
+    # the page's Origin: this machine by name, or the very host the request went to (a phone on http://192.168.1.5:8765
+    # sends that in both). Never just "any IP": bound to every interface, a page served from some other IP address
+    # could otherwise open ws://127.0.0.1:8765 (websockets have no CORS)
+    def origin_ok(name, hostname):
+        return name is not None and (name in LOCAL_HOSTS or name == own or name == hostname)
+
+    @web.middleware
+    async def guard(request, handler):
+        h, origin = request.headers.get("Host"), request.headers.get("Origin")
+        hn = _hostname(h)
+        if not allowed(hn) or (origin is not None and not origin_ok(_hostname(origin), hn)):
+            log.warning("refused %s %s (Host %s, Origin %s)", request.method, request.path, h, origin)
+            raise web.HTTPForbidden()
+        return await handler(request)
+    return guard
+
+
+def make_app(server: FlyServer, host: str = "127.0.0.1") -> web.Application:
+    # every route: the websocket drives and pokes the flies and streams them, /analysis takes uploads
+    app = web.Application(middlewares=[host_guard(host)])
     app.router.add_get("/", page)
     app.router.add_get("/{name:index|viz}.html", page)
     app.on_response_prepare.append(no_stale)
@@ -516,7 +681,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     server = FlyServer(args.brain, args.flies, parallel=not args.serial, gpu=False if args.cpu else None)
     print(f"\n  Fly brain DJ -> http://{args.host}:{args.port}\n")
-    web.run_app(make_app(server), host=args.host, port=args.port, print=None)
+    web.run_app(make_app(server, args.host), host=args.host, port=args.port, print=None)
 
 
 if __name__ == "__main__":

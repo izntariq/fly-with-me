@@ -22,6 +22,7 @@ same Shiu et al. LIF model:
 """
 from __future__ import annotations
 
+import os
 import urllib.request
 from pathlib import Path
 
@@ -60,7 +61,10 @@ def fetch():
     for f in (F_ANN, F_NT, F_W):
         if not (DIR / f).exists():
             print(f"fetching the male CNS connectome: {f} ...")
-            urllib.request.urlretrieve(BASE + f, DIR / f)
+            # renamed only once complete, so an interrupted download is fetched again instead of read truncated
+            part = DIR / (f + ".part")
+            urllib.request.urlretrieve(BASE + f, part)
+            os.replace(part, DIR / f)
 
 
 def _traced() -> pd.DataFrame:
@@ -92,7 +96,10 @@ def load_connectome():
     indptr = np.zeros(len(ids) + 1, np.int64)
     np.add.at(indptr, pre + 1, 1)
     indptr = np.cumsum(indptr)
-    np.savez(CACHE, ids=ids, indptr=indptr, indices=post, weights=w)
+    tmp = CACHE.with_name(CACHE.name + ".part")      # whole or not at all (a file object: np.savez adds no .npz)
+    with open(tmp, "wb") as f:
+        np.savez(f, ids=ids, indptr=indptr, indices=post, weights=w)
+    os.replace(tmp, CACHE)
     return ids, indptr, post, w
 
 
@@ -134,5 +141,7 @@ def load_annotations() -> pd.DataFrame:
         "side": side.to_numpy(),
         "top_nt": nt.reindex(ids).to_numpy(),
     }, index=pd.Index(ids, name="root_id"))
-    out.to_parquet(ANN_CACHE)
+    tmp = ANN_CACHE.with_name(ANN_CACHE.name + ".part")
+    out.to_parquet(tmp)
+    os.replace(tmp, ANN_CACHE)
     return out

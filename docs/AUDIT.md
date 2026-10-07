@@ -109,7 +109,7 @@ deck B raw cue -> ears -> listener fly B (trained synapses) --+-- 12 DN taps -> 
 - Single 2.5–10 minute runs give per-section counts in the single digits to tens, and results swing more between
   runs than between brains.
 - There's no fixed benchmark, no repeated runs, no confidence intervals, and no real tracks.
-- Headless Chrome runs at a different load than the user's Safari.
+- Headless Chrome runs at a different load than Safari, where the app is used.
 
 ## Improvement plan
 
@@ -192,7 +192,7 @@ Items 1–4 and 13 are built:
 - `flydj.js`: mixing gated on the sensed section; the incoming track cued to its intro
 - `tools/djbench.mjs`: the benchmark
 
-The model was trained on **131 of the user's own real tracks** (pop, house, techno, indie). The fly listened to every
+The model was trained on **the library's 131 real tracks** (pop, house, techno, indie). The fly listened to every
 track on the GPU (`tools/record_real.py`), and reference sections came from each track's energy profile
 (`label_track`).
 
@@ -245,7 +245,7 @@ Two bugs found by the benchmark and fixed:
 - Fly + energy combined scores 0.57 overall, and best on breakdowns (P 0.54 / R 0.59, against 0.49 / 0.47 for the
   fly alone).
 - As measured, the fly adds some skill on breakdowns and is otherwise a noisier sensor of what the app already
-  computes. A fair test needs labels that aren't defined by energy: hand-marked sections on 20–30 of the user's
+  computes. A fair test needs labels that aren't defined by energy: hand-marked sections on 20–30 of the library's
   tracks.
 
 **2. The mixing gate leaks.**
@@ -362,7 +362,7 @@ air, and more runs.
 
 ### Pace: a moves-per-minute target, and a listening bug fixed (3 October)
 
-4 moves a minute felt too low for a showcase DJ, and that count excludes builds, horns and filter rides.
+The fly made about 4 moves a minute, and that count excludes builds, horns and filter rides.
 
 - **A target pace** ("moves per minute" slider, default 8). The burst threshold adapts slowly (homeostasis) until
   the fly's moves reach the target. Moves are still fired by its strongest neuron bursts, queued up to 3, and played
@@ -453,7 +453,7 @@ group repeat within a bar or two.
 - the measurements and the docs
 
 Each finding below was traced in the code. The library-wide counts come from copies of the grid fit and the exit planner
-run over all 492 All-In-One analyses.
+run over all 499 All-In-One analyses (the app applied 492 of them at the time).
 
 ### Verdict
 
@@ -512,8 +512,8 @@ run over all 492 All-In-One analyses.
    - djbench's `labelOf` reads `d.track.sections`, the same array the planner exits by.
    - Every benchmark track is now analysed, so "mixes from an outro" is close to true by construction (the exit is the
      first bar after the last verse or chorus).
-   - "Fit" is roughly one minus the share of echo-family moves in choruses: 82 of 85 fit failures in the 3 October
-     10-minute runs were exactly that.
+   - "Fit" is roughly one minus the share of space and filter moves in choruses: 83 of the 85 fit failures in the
+     3 October 10-minute runs were echo-family, filter or sweep moves in choruses (68 of them echo, dub or reverb).
    - Together these measure whether the planner follows All-In-One, not the fly's ear or taste.
    - The in-progress A/B has the same problem, plus another. Each version is scored on its own grid, and 9 of the 48
      fresh tracks get a different grid at 6901364 than at HEAD (a-day-in-the-life: 114 against 164 BPM). So the
@@ -640,7 +640,7 @@ run over all 492 All-In-One analyses.
 1. **The three audible bugs (1–3):**
    - Mark a deck as played when it leaves the air, and reload it before it can be cued.
    - Fix each deck's fold factor when the track loads, and glide toward the tempo it actually plays at.
-   - Require 16 bars after landing for a double drop (or shorten it to fit).
+   - Make a double drop fit what the outgoing track has left after landing: shorten it, or play a drop swap.
 2. **Timing (4–8):**
    - Hold the tempo until the last event any move has scheduled.
    - Track time on air by which deck is on air, not by airness.
@@ -670,4 +670,157 @@ run over all 492 All-In-One analyses.
    - Bring README, NOTES, TRAINING and CHANGELOG up to the three-fly GPU app.
    - Correct the 2–3 October tables (above).
    - Report compare_sense.
-   - Remove the user's prompts quoted in CHANGELOG before anything is published.
+
+### The final benchmark of the 4 October fixes
+
+**Setup.**
+- The 48 fresh tracks, 5 runs × 10 min on the same seeds.
+- The code at 1167539, against the code before the fixes (6901364).
+- Both were scored with `tools/djscore.mjs`, placing each transition on the raw All-In-One sections through the grid
+  that version actually played on (`FILE@1167539`, `FILE@6901364`). The legacy measures are djbench's own.
+
+| | Before (6901364) | **After (1167539)** | After − before |
+|---|---|---|---|
+| Transitions landing in an outro (All-In-One) | 4 of 9 (0.44, Wilson 0.19–0.73) | **9 of 11 (0.82, 0.52–0.95)** | +0.37, Newcombe −0.04 to 0.66 |
+| Transitions landing mid-song | 4 of 9 | **1 of 11** | −0.35, −0.65 to 0.03 |
+| Planned exits landing in an outro | 1 of 4 | **9 of 10** | **+0.65, 0.11 to 0.87** |
+| Transitions done before the outgoing track ends | 9 of 9 | 11 of 11 | – |
+| Outgoing audio left when the mix is done (median) | 13 s | 20 s | – |
+| Transitions on a bar line / a 4-bar line | 1.00 / 0.89 | 0.91 / 0.82 | not significant |
+| Moves per minute | 8.2 ± 0.8 | 8.8 ± 0.9 | not significant |
+| Dropouts per 10 min (old detector) | 0.4 | 0.2 | not significant |
+| Time on air per track | 179 s | 177 s | – |
+| Load (end of run) | 0.75 | 0.74 | – |
+
+**What it shows.**
+- The planned exit now lands where the song's outro is. Before, three of the four planned exits landed mid-song on the
+  real sections, because the pre-fix grid (downbeats numbered 0, 1, 2…) slid off the song.
+- Nothing measured got worse.
+- The intervals are wide: 9–11 transitions per arm. Only the first two tracks of each run are paired (finding 7).
+
+## Audit 4: fix status
+
+The fixes were made on the branches `audit4-fixes` and `audit4-review2`, and land on `fork/steady-mix`.
+
+- `tools/test_dj_logic.mjs` runs the app's own Mixer / Deck / Performer / FlyDJ in plain Node on a recording stand-in
+  for Web Audio. It has 27 checks, and all pass. The first 22 came with the fixes: all but the positive control fail
+  on the code before them. The 7 added or changed by the second review fail on the commit before it.
+- The fixes were then reviewed again (next section).
+
+| Finding | Fix | Commit |
+|---|---|---|
+| 1 Replayed tracks | A deck that was on air for 10 s or more is marked spent when it leaves the air, and reloaded before it can be cued again. If nothing new loads in 10 s (a tiny crate), and no load is still decoding, the guard lifts | bdb8302, 140ea8f, 8969b97, ea9e82d, c44fbbc |
+| 2 Half / double-time glides | The fold is picked once per load (and again after a tempo correction). The glide aims at `Mixer.tempoOf` (the track's tempo in the set's frame). The blend-or-cut tempo gap is measured after the fold | bdb8302 |
+| 3 Double drop past the end | Needs 36 beats after landing at the exit. At fire time it is sized to what the outgoing track has left, in whole 4-bar phrases (at most 16 bars); under 4 bars it becomes a drop swap | bdb8302, c44fbbc |
+| 4 Long moves before the exit | `exitRoom` / `buildBars`: builds shrink or skip, and phrase-long moves become a throw, unless they end 4 bars before mixBar. Time on air counts through mashups and double drops | bdb8302 |
+| 5 Tempo under scheduled moves | `Performer._hold`: every move with audio-clock events holds the tempo until its last one, and the tempo fader and the glide stay put while held. A drop swap's hold ends at its drop; your own tempo change ends any hold | bdb8302, c44fbbc |
+| 6 Spinback | Muted until the cut | bdb8302, c44fbbc |
+| 7 FX on the master tempo | FXRack's beat is the on-air deck's | bdb8302 |
+| 8 Filter moves back to back | `holdAt` (cancelAndHoldAtTime, with a fallback); an idle parameter starts from its resting value | bdb8302, c44fbbc |
+| 9 Safari timer throttling | The control loop runs on a worker's timer, and the fader position follows the audio clock | 3ff028a, c44fbbc |
+| 10, 18 ½× / 2×, drops | Greyed on analysed tracks. Drops are deduplicated by SHA-1 and a batch keeps its order | a2b6573 |
+| 11 DNS rebinding | A Host allow-list (localhost, 127.0.0.1, ::1, `--host`; bound to every interface, any IP literal). Origin must be this machine or the host the request went to | 8a0ef8f, cd6655e |
+| 12 Stalled client | A 4-frame queue and a sender task per client | 8a0ef8f |
+| 13, 15 Analyses, uploads | `<sha>.failed` → 410 (not when the analyser was killed by a signal). Audio and demix files are deleted after each run, stale leftovers swept. Uploads are streamed and hashed off the event loop | 8a0ef8f, cd6655e |
+| 14 Refractory kicks | As in Brian2: a kick adds to v while refractory but can't fire then, and a kick spike starts a refractory period. CPU and GPU match | 8a0ef8f |
+| 16 Changed brain server | The hello is fingerprinted: the visualiser reloads, the DJ page shows a reload banner | a2b6573 |
+| 17 Crate memory | Only the decks, the audition and the next few candidates keep decoded audio; a big drop is trimmed every 4 files. Stems are split on load, none over 12 min | a2b6573, ea9e82d |
+| Grid fit | Downbeats are numbered from the last one on the grid. 4+ half-bar downbeats in a row are the bar line moving. The fit moves to the end (or past the last bar-line move) when the whole-track line misses the exit. The bar must be a whole number of beats (2: a double-time grid, 8: a downbeat every other bar, 5–7 or not whole: the beat tempo, no blends). Over the 499 analyses: 494 grids applied (492 before), 390 steady (394), exit downbeats on the app's bar lines 0.919 | 5cc2bbc, 1fb7f0e |
+| Measurements 1–9 | Benchmark v3: `djbench` logs track positions, and `djscore` grades offline against the raw All-In-One files, by driver, with paired A/B and `SET=random:n:seed`. The crate is put in name order before the seeded shuffle | f6ea7fa, 1fb7f0e |
+| Smaller items | Cooldown floor of 2 bars; autopilot off forgets a lined-up transition. EQ kills on the audio clock; cuts ramp; echo throws extend; slow delay retune; reversed windows, not whole-track copies. A deck ending at the fader midpoint doesn't load a third track. Malecns and cache downloads are atomic. Stale drive is zeroed. Resets happen between frames. GPU duplicate stimuli are summed | bdb8302, 8a0ef8f |
+
+**Not done:**
+- **Retraining the section model on the All-In-One grid (fix 6).** On analysed tracks the DJ exits by All-In-One's
+  sections and never consults the model, so the mismatch only skews the benchmark's sense scores. It isn't worth
+  hours of GPU time until compare_sense gives the fly's neurons a reason to carry decisions.
+- **Re-measuring the CPU validation figures after the refractory-kick fix.** On the GPU the sugar test now gives
+  18.8k–19.5k spikes and 386–392 active neurons over 3 seeds, and the music-like drive 34.1k spikes and 509 active
+  neurons. The CPU references (20,145 spikes, 406 active neurons) predate the fix.
+
+## Second review of the fixes
+
+A second read-only review of the Audit 4 fixes found these, now fixed:
+
+| Area | Found | Fix | Commit |
+|---|---|---|---|
+| Server | An analyser killed by a signal (Ctrl-C on the server reaches it too; macOS memory-pressure kills) wrote `<sha>.failed`, so after a restart the track could never be analysed | Only a run that failed or timed out is terminal | cd6655e |
+| Server | Bound to every interface, Origin could be any IP address, so a page served from another address could open `ws://127.0.0.1` (websockets have no CORS) | Origin must be this machine by name, or the very host the request went to | cd6655e |
+| Server | A server stopped mid-upload left a `.part` file, and one stopped with uploads waiting for their run left their audio | At start, upload leftovers over 6 h old are swept | cd6655e |
+| App | A big drop held every file decoded until the last one was in | Trimmed every 4 files | ea9e82d |
+| App | An audition of a released track started its 5 s before the track was decoded again, and an unreadable one was scored on the previous audio | The 5 s start when it plays; an unreadable one is skipped | ea9e82d |
+| App | A load that finished decoding after its deck came on air, or while a transition was lined up, swapped the track mid-transition | Such a load is dropped; the 10 s "nothing new" fallback waits for a load still decoding | ea9e82d |
+| App | A decode error on a released track (memory pressure) removed it from the crate | It sits out a minute; only a file that can't be read leaves | ea9e82d |
+| App | Overlapping drops could interleave; the stem worker's error handler could act on the wrong worker | Each drop keeps its own order; the handler acts on the worker that failed, and one that never started isn't blamed on the track | ea9e82d |
+| DJ | With the control loop on a worker's timer, a hidden page saw the old deck on air for up to a second after a cut, and could cue the new one back to its first bar | The fader position takes a cut when the audio clock reaches it; so does the tempo snap | c44fbbc |
+| DJ | A quick fader nudge marked a deck played; a nudge during a fader hold left the deck never reloaded, which stopped the mixing for good | A deck is marked played after 10+ s on air, its reload clock restarts when it is, and decks are tracked with the autopilot off | c44fbbc |
+| Audio | On an idle parameter `cancelAndHoldAtTime` pins nothing, so a move's ramp started at once: a build's reverb wash swelled from the moment it was decided | `holdAt` pins the resting value | c44fbbc |
+| Audio | A drop swap held the tempo for a bar past its drop; the glide moved on while the tempo was held | The hold ends at the drop; the glide waits; your tempo change ends any hold | c44fbbc |
+| Audio | The spinback's mute ended right as the cut began, before its ramp was done; backward scratch strokes took their reversed audio from ahead of the needle; double drops could end mid-phrase | The mute outlasts the ramp; the window sits behind the needle; double drops are whole 4-bar phrases | c44fbbc |
+| Grid fit | A bar line that moves by half a bar (a bar of 2 beats) passed as the tracker's stray extras, so those tracks counted as steady; a track whose bar line moves near the end was rejected | 4+ half-bar downbeats in a row count as off the grid, and the fit can take the stretch after the last move. 8 steady tracks still have most exit downbeats off the bar lines (16 before; 10 before Audit 4) | 1fb7f0e |
+| Grid fit | A bar that isn't a whole number of beats didn't get the beat tempo its comment promised | It does | 1fb7f0e |
+| Benchmark | The seeded shuffle started from the crate's drop order, which differs between app versions, so the same seed gave two versions different crates | The crate is put in name order, then shuffled (Fisher-Yates) | 1fb7f0e |
+| Benchmark | A move swapped for a short one near the exit was logged as the one planned; djscore left out drivers that didn't fire, and graded blends the fly turned back as transitions | Logged as what played; every driver reported; reversed blends not graded | 1fb7f0e |
+
+**The listeners' section sense seemed to collapse, and it was the benchmark.** In the first v3 runs of the merged code
+on the fresh set, the listeners' MIX sense scored precision and recall 0. The fix that keeps a drop in order had
+changed the order the app adds a drop in (it used to reverse a batch), and djbench shuffled whatever order the crate
+was in. So the same seed gave the two versions different crates. The merged code's crate opened with tracks that have
+no intro in All-In-One's labels (only a start of under half a second). The base code under v3 on its own crate scored
+normally (section accuracy 0.46, MIX recall 0.95). djbench now puts the crate in name order before the seeded
+Fisher-Yates shuffle.
+
+The refractory-kick change was checked separately, by a seeded A/B of the merged code with and without it (one
+6-minute run each, on the same crate): MIX scored 0 in both, and section accuracy 0.36 without it and 0.31 with it
+(another run of the merged code on that crate gave 0.26). It wasn't the cause.
+
+**Same-crate confirmation run.** The fresh set, seed 1234, 1 run × 6 min each, with the fixed djbench (both versions get
+the same crate):
+
+| Listener sense (both decks, against All-In-One) | Before the fixes (b3aaaa6) | After (1fb7f0e) |
+|---|---|---|
+| Section accuracy | 0.53 | 0.44 |
+| Intro / outro sense, precision / recall | 0.20 / 0.71 | 0.11 / 0.68 |
+| Breakdown sense, precision / recall | 0.52 / 0.58 | 0.43 / 0.49 |
+| Main-section sense, precision / recall | 0.69 / 0.58 | 0.60 / 0.58 |
+| Transitions / dropouts / load | 2 / 0 / 0.75 | 2 / 0 / 0.77 |
+
+- No collapse: every sense works on the fixed code.
+- It reads lower in this one run. Single runs have ranged from 0.36 to 0.55 in section accuracy, and only the first
+  two tracks are paired (later ones depend on the brain's auditions), so this is no measured drop. Telling a real
+  drop from noise needs 5 runs per version (`SET=fresh RUNS=5 MIN=10`, about 75 min).
+
+## Audit 4: run log and tools, for the next audit
+
+**Benchmark files** (`data/bench/`, gitignored, kept on this Mac; named by UTC time).
+- Files before "v3" are djbench v2: no track positions, and the old seeded sort.
+- `djscore FILE@1167539` / `FILE@6901364` places a v2 file's transitions on the All-In-One reference.
+- "Old shuffle" (before 1fb7f0e): different app versions got different crates from the same seed.
+
+| File | Code | Settings | What it was |
+|---|---|---|---|
+| `new-2026-10-04-10-38` … `12-45` (5 files) | the 4 October fixes in progress (0b07b18 … 6164c67) | v2, held-out 24, 1 run × 4–6 min | Development runs of the previous session |
+| `new-2026-10-04-13-52` | 1167539 | v2, fresh 48, 5 × 10 min | Final benchmark, after the 4 October fixes |
+| `new-2026-10-04-14-44` | 6901364 | v2, fresh 48, 5 × 10 min | Final benchmark, before them |
+| `new-2026-10-04-14-51` | the merged Audit 4 fixes, before their review | v3, fresh, 1 × 6 min, old shuffle | First full-app run of the fixes; the apparent sense collapse |
+| `new-2026-10-04-16-17` | ea9e82d with the GPU kick change undone | v3, fresh, 1 × 6 min, old shuffle | Refractory-kick A/B, without the fix |
+| `new-2026-10-04-16-23` | ea9e82d | v3, fresh, 1 × 6 min, old shuffle | Refractory-kick A/B, with the fix |
+| `new-2026-10-04-19-46` | b3aaaa6 | v3, fresh, 1 × 6 min, old shuffle | The base code under v3: the sense was fine, so the collapse was the benchmark's |
+| `new-2026-10-06-03-23` | b3aaaa6 | v3, fresh, 1 × 6 min, name-sorted shuffle | Same-crate confirmation, before the fixes |
+| `new-2026-10-06-03-30` | 1fb7f0e | v3, fresh, 1 × 6 min, name-sorted shuffle | Same-crate confirmation, after the fixes |
+
+**Tools for the next audit:**
+
+| Tool | What it checks |
+|---|---|
+| `node tools/test_dj_logic.mjs` | The DJ's decisions, in plain Node (27 checks, seconds, no server). Make each new check fail on the code before its fix. |
+| `PORT=8766 node tools/test_decks.mjs` | Deck scheduling, rendered in real Web Audio (headless Chrome) |
+| `node tools/gridcheck.mjs [rev …] [--changed]` | The grid fit over all 499 analyses, against earlier revisions. Today: 1167539 gives 492 applied / 394 steady / exit on bar lines 0.868; now 494 / 390 / 0.919 |
+| `PORT=8766 SET=… RUNS=… MIN=… node tools/djbench.mjs`, then `node tools/djscore.mjs A.json B.json` | The full app, then scoring against the raw All-In-One files. Run versions one at a time (they share the GPU), on the same seeds |
+| `.venv/bin/python tools/gpucheck.py` | GPU spike statistics. Today: sugar 18,806 / 19,542 / 19,175 spikes and 392 / 386 / 389 active (seeds 1–3); music-like 34,099 / 509 |
+
+**How this audit was run, and what to keep:**
+- Five read-only reviewers, one per area: audio, DJ logic, app and visualiser, server and brain, measurements and docs.
+- Every finding was traced in the code before it was written up.
+- The fixes were made in separate worktrees, merged, then reviewed again by five more reviewers.
+- That second review found two high-severity bugs the fixes themselves had introduced, so review fixes before merging.
+- Tests and benchmarks ran on port 8766 only, one server at a time.

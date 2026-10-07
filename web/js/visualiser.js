@@ -508,8 +508,13 @@ function connect() {
   ws.onclose = () => { $('#stat').textContent = 'brain offline'; setTimeout(connect, 2000); };
 }
 
+// the brain this page was built for: the server greets every connection, and a restart can bring another brain (fly
+// count, connectome, outputs); then the positions, ears and neuron slots here are wrong, so the page starts over
+const helloKey = (h) => JSON.stringify([h.flies || 1, h.connectome || 'flywire', h.n_neurons, h.n_connections,
+  h.inputs?.length, h.outputs?.length, h.trained?.synapses ?? 0]);
+
 async function onHello(h) {
-  if (V.hello) return;
+  if (V.hello) { if (helloKey(h) !== helloKey(V.hello)) location.reload(); return; }    // same brain: a reconnect
   V.hello = h; V.flies = h.flies || 1;
   loadPositions(await (await fetch('brain_xyz.bin')).arrayBuffer());
   // the DJ fly's ears: centroids of its left / right Johnston's organ neurons (where the listener streams land)
@@ -519,6 +524,7 @@ async function onHello(h) {
   if (h.dj_tap_types) { const taps = new Set(h.dj_tap_types); V.tapSlot = h.outputs.map((o) => o.cls === 'descending' && taps.has(o.type)); }
   V.performer = V.flies === 3 ? 2 : 0;
   requestAnimationFrame(draw);
+  bus?.postMessage({ type: 'sync?' });             // the move history: the answer to the first ask came before this hello
 }
 
 function onFrame(f) {
@@ -538,7 +544,13 @@ bus?.addEventListener('message', (e) => {
   const d = e.data;
   if (d.type === 'state') { V.state = d; V.stateAt = clock(); V.performer = d.performer ?? V.performer; renderDecks(); }
   else if (d.type === 'move') onMove(d);
-  else if (d.type === 'sync') { for (const m of d.moves.slice(-7)) onMove(m, true); renderHist(); }
+  else if (d.type === 'sync' && V.hello) {
+    // asked more than once (at load, at hello, while the DJ app is quiet): add only moves not shown yet, newest first
+    const seen = new Set(V.moves.map((m) => m.t));
+    for (const m of d.moves.slice(-7)) if (!seen.has(m.t)) onMove(m, true);
+    V.moves.sort((a, b) => b.t - a.t); V.moves.length = Math.min(V.moves.length, 7);
+    renderHist();
+  }
   else if (d.type === 'log') { V.logs.unshift(d.html); V.logs.length = Math.min(V.logs.length, 3); $('#tick').innerHTML = V.logs.map((l) => `<div>${safeHTML(l)}</div>`).join(''); }
 });
 bus?.postMessage({ type: 'sync?' });
@@ -643,6 +655,7 @@ function resize() {
 let lastPanel = 0;
 function draw() {
   requestAnimationFrame(draw);
+  if (V.glLost) return;
   const t = clock(), dt = Math.min(0.1, t - V.lastT), dpr = resize(), W = innerWidth, H = innerHeight;
   V.lastT = t;
   const B = beatInfo(t), X = V.X = look(t, B);
@@ -932,6 +945,11 @@ addEventListener('keydown', (e) => {
     else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
   }
 });
+
+// Safari drops WebGL contexts under GPU memory pressure: stop drawing, and when the context comes back start the page
+// over (every buffer, texture and program went with the old one; the move history is asked for again)
+glc.addEventListener('webglcontextlost', (e) => { e.preventDefault(); V.glLost = true; $('#msg').textContent = 'the GPU dropped the picture: waiting for it to come back…'; });
+glc.addEventListener('webglcontextrestored', () => location.reload());
 
 window.flyViz = V;          // handy in the devtools console
 try { initGL(); connect(); } catch (e) { $('#msg').textContent = `can't draw the brain here: ${e.message}`; }

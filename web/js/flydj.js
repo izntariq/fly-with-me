@@ -297,8 +297,8 @@ export class FlyDJ {
     if (a.want === 'break' && E > 0.55) a.want = null;
     if (a.want && !this.perf.busy() && !this.holdMoves()) {
       if (a.want === 'peak') {
-        const pb = this.persona.build || {};
-        if (this.perf.buildDrop({ kind: pb.kind || 'snare', bars: 8, horn: pb.horn ?? true, who: '📋 <b>set plan: peak</b>' })) this.lastBuild = now;
+        const pb = this.persona.build || {}, bars = this.buildBars(8);
+        if (bars && this.perf.buildDrop({ kind: pb.kind || 'snare', bars, horn: pb.horn ?? true, who: '📋 <b>set plan: peak</b>' })) this.lastBuild = now;
       } else {
         this.doMove(this.mixer.onAir().hasStems ? 'drumsout' : 'singalong', '📋 <b>set plan: breakdown</b>');
       }
@@ -359,7 +359,8 @@ export class FlyDJ {
       if (!m.continuous && this.auto && this.t > 15 && m.slots.length && !this.perf.busy() && !this.holdMoves()) {
         const prof = this.profile(), cs = this.coolScale * prof.cool * (this.persona.cool || 1);
         const thr = this.phraseMoves ? this.thr : 1;
-        if (m.fast > m.slow * (1 + (this.ratioOf(m) - 1) * thr) + m.min * thr && now - m.lastFire > m.cool * beat * cs * Math.min(1, thr)
+        // (a group's cooldown never drops below 2 bars, however low the pace threshold goes: no one trick every bar)
+        if (m.fast > m.slow * (1 + (this.ratioOf(m) - 1) * thr) + m.min * thr && now - m.lastFire > Math.max(8 * beat, m.cool * beat * cs * Math.min(1, thr))
             && now - this.lastAny > (this.phraseMoves ? 2 : 4) * beat * cs) {
           const sec = this.section();
           let key = prof.remap?.[m.key] ?? m.key;
@@ -432,12 +433,12 @@ export class FlyDJ {
         && now - this.lastBuild > 64 * beat * this.coolScale / (this.profile().build * (this.persona.build?.often ?? 1)) && this.onAirSince > 20
         && !this.section().afterDrop) {
       this.lastBuild = now; ar.fired = performance.now();
-      const pb = this.persona.build || {}, bars = (pb.bars || 4) * (this.epic > 0.75 ? 2 : 1), on = this.mixer.onAir(), b = on.beatAt();
+      const pb = this.persona.build || {}, bars = this.buildBars((pb.bars || 4) * (this.epic > 0.75 ? 2 : 1)), on = this.mixer.onAir(), b = on.beatAt();
       const opts = { kind: pb.kind || 'roll', horn: pb.horn ?? true };
-      // if the track has its own drop coming, time the build so it lands exactly there
-      const drop = (on.track.cues || []).filter((c) => c.name.startsWith('drop')).map((c) => c.beat - b).filter((d) => d > bars * 4 + 2 && d < 96).sort((x, y) => x - y)[0];
+      // if the track has its own drop coming, time the build so it lands exactly there (and still before the exit)
+      const drop = (on.track.cues || []).filter((c) => c.name.startsWith('drop')).map((c) => c.beat - b).filter((d) => d > bars * 4 + 2 && d < 96 && d + 4 <= this.exitRoom()).sort((x, y) => x - y)[0];
       const who = `<b>arousal surge</b> across ${ar.slots.length} descending neurons`;
-      const Td = drop != null ? this.perf.buildDrop({ ...opts, bars, startBeat: Math.round(b + drop) - bars * 4, who: who + ' (timed to the track\'s own drop)' })
+      const Td = !bars ? null : drop != null ? this.perf.buildDrop({ ...opts, bars, startBeat: Math.round(b + drop) - bars * 4, who: who + ' (timed to the track\'s own drop)' })
                               : this.perf.buildDrop({ ...opts, bars, who });
       if (Td) this.lastAny = Td;
     }
@@ -516,8 +517,26 @@ export class FlyDJ {
     return v;
   }
 
+  // beats left before the planned exit's decision line (4 bars ahead of mixBar) on an analysed track. A move must be
+  // over by then: one that is still running (busy, crossfader lock) holds the exit, and the fly ends up past it
+  exitRoom() {
+    const on = this.mixer.onAir(), t = on.track;
+    if (!t?.sections || t.mixBar == null || this.useSections === false || !this.mixer.offAir().playing) return Infinity;
+    return (t.mixBar - 4) * 4 - on.beatAt();
+  }
+  // the bars a build may take so it (from the next bar line, plus its tail) is over before the exit; 0: no room
+  buildBars(bars) {
+    const room = this.exitRoom();
+    while (bars > 2 && bars * 4 + 10 > room) bars = Math.max(2, Math.floor(bars / 2));
+    return bars * 4 + 10 <= room ? bars : 0;
+  }
+
   doMove(name, who) {
     const P = this.perf, fx = ['echo', 'reverb', 'flanger', 'trans', 'crush', 'lpf', 'sweep'];
+    // phrase-long moves (beats, from the next bar line) that don't fit before the planned exit: a short throw instead
+    const long = { mashup: 68, layer: 36, melodyout: 36, drumsout: 20, singalong: 20, acid: 20, chop: 12 }[name];
+    if (long && long > this.exitRoom()) name = 'echo';
+    this.moveName = name;                                 // what plays (for the benchmark's log)
     if (fx.includes(name)) return P.beatFx(name, name === 'flanger' || name === 'lpf' || name === 'sweep' ? 4 : name === 'reverb' ? 2 : 1, who);
     if (name.startsWith('roll')) return P.roll(1 / +name.slice(4), 1, who);
     if (['baby', 'chirp', 'flare', 'transformer', 'orbit', 'crab'].includes(name)) return P.scratch(name, 2, who);
@@ -532,7 +551,7 @@ export class FlyDJ {
       case 'layer': return P.layer({ bars: 8, who });
       case 'mashup': return P.mashup({ bars: 16, who });
       case 'drumsout': return P.drumsOut({ bars: 4, who });
-      case 'melodyout': return P.melodyOut({ bars: 8, who }) || P.beatFx('lpf', 4, who);
+      case 'melodyout': return P.melodyOut({ bars: 8, who }) || ((this.moveName = 'lpf'), P.beatFx('lpf', 4, who));
       case 'dub': return P.dub(who);
       case 'resfilter': return P.resFilter(who);
       case 'pump': return P.pump(who);
@@ -551,7 +570,9 @@ export class FlyDJ {
     let ok = steady && !(atExit && t?.exit === 'echo') ? Object.keys(LEAD) : ['echo', 'spin', 'cut', 'kill', 'drop'];
     if (atExit && t?.mixBar != null) {
       const b = on.beatAt(now + 0.2), toEnd = (on.duration - t.firstBeat) * t.bpm / 60 - b;
-      ok = ok.filter((st) => t.mixBar * 4 - b >= LEAD[st] || LEAD[st] + 4 + (st === 'blend' ? 32 : 8) <= toEnd);
+      ok = ok.filter((st) => (t.mixBar * 4 - b >= LEAD[st] || LEAD[st] + 4 + (st === 'blend' ? 32 : 8) <= toEnd)
+        // a double drop plays both decks for 8+ bars after it lands: the outgoing track must still be there
+        && (st !== 'double' || toEnd - Math.max(t.mixBar * 4 - b, LEAD[st] + 4) >= 36));
       if (!ok.length) ok = ['cut'];
     }
     return ok;
@@ -569,7 +590,8 @@ export class FlyDJ {
   chooseStyle(allowed = Object.keys(LEAD)) {
     const r = (k) => { const m = this.byKey[k]; return m.fast / (m.slow + 1); };
     const [on, off] = [this.mixer.onAir(), this.mixer.offAir()];
-    const gap = on.track && off.track ? Math.abs(off.track.bpm / on.track.bpm - 1) : 0;
+    const tp = (d) => this.mixer.tempoOf?.(d.track) ?? d.track.bpm;   // after the half / double-time fold
+    const gap = on.track && off.track ? Math.abs(tp(off) / tp(on) - 1) : 0;
     const halfDouble = Math.abs(off.track?.bpm * 2 / on.track?.bpm - 1) < 0.06 || Math.abs(off.track?.bpm / 2 / on.track?.bpm - 1) < 0.06;
     const w = { blend: 1, echo: 1, drop: 1, spin: 1, cut: 0, double: 0, ...(this.persona.transitions || {}) };
     for (const k of Object.keys(LEAD)) if (!allowed.includes(k)) w[k] = 0;
@@ -589,7 +611,7 @@ export class FlyDJ {
   // 16-beat phrase line, or the next bar line when that would leave the transition no room before the end
   plan(onAir, style, now, mixPoint = null) {
     const lead = LEAD[style] ?? 4, b0 = onAir.beatAt(now + 0.2) + lead, t = onAir.track;
-    const endBeat = (onAir.duration - t.firstBeat) * t.bpm / 60, need = style === 'blend' ? 32 : 8;
+    const endBeat = (onAir.duration - t.firstBeat) * t.bpm / 60, need = style === 'blend' ? 32 : style === 'double' ? 36 : 8;
     let land = Math.ceil(b0 / 16) * 16;
     if (mixPoint != null && mixPoint >= b0 && mixPoint - b0 <= 16) land = mixPoint;
     else if (land + need > endBeat) land = Math.ceil(b0 / 4) * 4;
@@ -614,7 +636,20 @@ export class FlyDJ {
     const mx = this.mixer, [A, B] = mx.decks, now = mx.ctx.currentTime;
     // voice swell from motor neurons
     this.synth.setLevel(this.voiceLevel * (1 + Math.min(1.5, this.byKey.sing.fast / 20)));
-    if (!this.auto) return;
+    const onAir = mx.onAir();
+    // time this track has been fully on air; a cut swaps decks instantly, so a new deck or track restarts it
+    const fresh = onAir !== this._onAirDeck || onAir.track !== this._onAirTrack;
+    // the deck that just left the air has had its turn with that track (if it played a while: a quick nudge of the
+    // fader doesn't count): it gets a new one before it can be cued again. Tracked with the autopilot off too
+    const left = this._onAirDeck;
+    if (onAir !== left && left?.track && left.track === this._onAirTrack && this.onAirSince > 10) {
+      left.spent = this._onAirTrack; left.reloadAt = null; this.offAirSince[mx.decks.indexOf(left)] = 0;
+    }
+    this._onAirDeck = onAir; this._onAirTrack = onAir.track;
+    // a mashup or a double drop moves the fader off the end stop without changing the track on air: keep counting.
+    // Only a blend in progress pauses the clock (the new track isn't fully in yet)
+    this.onAirSince = fresh ? 0 : this.onAirSince + (mx.airness(onAir) > 0.99 || !this.commit ? dt : 0);
+    if (!this.auto) { this.pending = null; return; }     // a transition lined up before you took over is forgotten
 
     // continuous filters from the low-frequency auditory pathway (relative to its own baseline)
     for (const [deck, k] of [[A, 'filtL'], [B, 'filtR']]) {
@@ -625,11 +660,6 @@ export class FlyDJ {
     }
 
     this.tickArc(now);
-    const onAir = mx.onAir();
-    // time this track has been fully on air; a cut swaps decks instantly, so a new deck or track restarts it
-    const fresh = onAir !== this._onAirDeck || onAir.track !== this._onAirTrack;
-    this._onAirDeck = onAir; this._onAirTrack = onAir.track;
-    this.onAirSince = mx.airness(onAir) > 0.99 && !fresh ? this.onAirSince + dt : 0;
     if (this.userHold > 0) { this.userHold -= dt; return; }
     if (now < mx.lockUntil) return;
     const bothPlaying = A.playing && B.playing;
@@ -650,7 +680,11 @@ export class FlyDJ {
         return;
       }
       if (now >= this.pending.at) {
-        const { style, dir } = this.pending, P = this.perf, who = '<b>the fly</b>';
+        let { style, dir, landT } = this.pending, P = this.perf, who = '<b>the fly</b>';
+        // a double drop runs both decks for up to 16 bars after landing: no longer than the outgoing track has left
+        const fit = Math.min(16, Math.floor((onAir.duration - onAir.position(landT ?? now)) / onAir.rate / beatLen / 4) - 1);
+        const bars = fit >= 4 ? Math.floor(fit / 4) * 4 : fit;          // whole phrases: the last cut lands on one
+        if (style === 'double' && bars < 4) style = 'drop';
         this.blendBeats = this.pending.blendBeats;
         this.queue = [];                                  // moves queued for the old track don't spill into the new one
         this.pending = null;
@@ -659,7 +693,7 @@ export class FlyDJ {
         else if (style === 'drop' && (at = P.dropSwap(who))) this.afterCut(at);
         else if (style === 'spin' && (at = P.spinCut(who))) this.afterCut(at);
         else if (style === 'cut' && (at = P.hardCut(who))) this.afterCut(at);
-        else if (style === 'double' && (at = P.doubleDrop({ who }))) this.afterCut(at);
+        else if (style === 'double' && (at = P.doubleDrop({ bars, who }))) this.afterCut(at);
         else if (style === 'kill' && (at = P.killDrop(who))) this.afterCut(at);
         else { this.commit = dir; mx.setCrossfader(x + dir * 0.13); this.log(`${who} starts a long EQ blend into deck ${dir > 0 ? 'B' : 'A'}`); }
       }
@@ -669,7 +703,8 @@ export class FlyDJ {
     // 2. decide whether to leave the on-air deck
     const endingSoon = onAir.playing && onAir.duration - onAir.position() < 40 * beatLen;
     if (this.aud) this.tickAudition(now);
-    if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud) {
+    const offPlayed = mx.offAir().track && mx.offAir().spent === mx.offAir().track;   // reloaded below first
+    if (atEdge && bothPlaying && this.t > 20 && !this.perf.busy() && !this.aud && !offPlayed) {
       const onIdx = onAir === A ? 0 : 1, dir = onAir === A ? 1 : -1;
       const minOn = Math.max(this.persona.onAir?.[0] ?? 0, this.minOnAir);
       const maxOn = Math.max(this.persona.onAir?.[1] ?? Infinity, minOn);
@@ -746,12 +781,17 @@ export class FlyDJ {
       const off = mx.airness(d) < 0.01;
       if (!off) { this.offAirSince[i] = 0; return; }
       this.offAirSince[i] += dt;
-      const spent = !d.track || !d.playing || d.position() > d.duration - 45;
+      // a track that has been on air is replaced whatever is left of it: cued again, it would play from its intro twice
+      const played = d.track && d.spent === d.track;
+      const spent = !d.track || !d.playing || played || d.position() > d.duration - 45;
       const onLeft = (onAir.duration - onAir.position()) / (onAir.rate || 1);
-      if (this.offAirSince[i] > 3 && spent && !this.pending && !this.aud && (onLeft > 90 || !d.track || !d.playing)) {
-        this.offAirSince[i] = -1e9;
-        if (this.picker) this.startAudition(i); else this.onLoadNext?.(i);
+      if (this.offAirSince[i] > 3 && spent && !this.pending && !this.aud && (onLeft > 90 || !d.track || !d.playing || played)) {
+        this.offAirSince[i] = -1e9; d.reloadAt = now;
+        if (this.picker && (onLeft > 30 || !played)) this.startAudition(i); else this.onLoadNext?.(i);   // no time to audition
       }
+      // still the played track 10 s after asking for another (a load decodes first, so it can take a moment): nothing
+      // new in the crate, it may come back
+      if (played && !this.aud && now - (d.reloadAt ?? Infinity) > 10 && !this.loadPending?.(i)) d.spent = null;
     });
   }
 

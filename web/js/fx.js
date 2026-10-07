@@ -5,6 +5,17 @@
 
 import { dagga, tilli } from './desi.js';
 
+// start a move on `p` at `at`. While the last move on it is still running then (p._end: when it ends), cut that one
+// off and carry on from the value it has at `at` (cancelAndHoldAtTime), instead of snapping back. Otherwise pin the
+// resting value `rest` at `at`: on an idle param cancelAndHoldAtTime pins nothing, and a ramp would start at once.
+// `end`: when this move ends
+export function holdAt(p, at, rest, end) {
+  const running = at < (p._end ?? -Infinity);
+  if (running && p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(at);
+  else { p.cancelScheduledValues(at); p.setValueAtTime(running ? p.value : rest, at); }   // (p.value: no hold support)
+  p._end = end;
+}
+
 function makeIR(ctx, seconds = 3.2, decay = 2.8) {
   const n = Math.floor(ctx.sampleRate * seconds), ir = ctx.createBuffer(2, n, ctx.sampleRate);
   for (let c = 0; c < 2; c++) {
@@ -56,19 +67,19 @@ export class FXRack {
     this.out.connect(dest);
     this.active = {};   // name -> ctx time it ends (for the UI)
   }
-  get spb() { return 60 / this.bpm; }
+  get spb() { return this.beat?.() ?? 60 / this.bpm; }      // the Mixer supplies the on-air deck's beat
   _mark(name, end) { this.active[name] = Math.max(this.active[name] || 0, end); }
   isActive(name) { return (this.active[name] || 0) > this.ctx.currentTime; }
 
   // high-pass sweep up over `beats` (build-ups), released at the end
   sweep(at, beats, top = 1800) {
     const f = this.hp.frequency, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); f.setValueAtTime(10, at); f.exponentialRampToValueAtTime(top, end - 0.01); f.setValueAtTime(10, end);
+    holdAt(f, at, 10, end); f.setValueAtTime(10, at); f.exponentialRampToValueAtTime(top, end - 0.01); f.setValueAtTime(10, end);
     this._mark('sweep', end);
   }
   lowpassDip(at, beats) {
     const f = this.lp.frequency, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); this.lp.Q.cancelScheduledValues(at); this.lp.Q.setValueAtTime(1.1, at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(350, at + beats * this.spb * 0.5);
+    holdAt(f, at, 22000, end); holdAt(this.lp.Q, at, 1.1, end); this.lp.Q.linearRampToValueAtTime(1.1, at + 0.05); f.exponentialRampToValueAtTime(350, at + beats * this.spb * 0.5);
     f.exponentialRampToValueAtTime(22000, end); this._mark('lpf', end);
   }
   // rhythmic volume chop ("trans"), div = notes per beat
@@ -100,8 +111,8 @@ export class FXRack {
   // Model 1 style resonant low-pass sweep down and back up over `beats`
   resSweep(at, beats) {
     const f = this.lp.frequency, q = this.lp.Q, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); q.cancelScheduledValues(at);
-    q.setValueAtTime(9, at); f.setValueAtTime(18000, at);
+    holdAt(f, at, 22000, end); holdAt(q, at, 1.1, end);
+    q.linearRampToValueAtTime(9, at + 0.05); f.exponentialRampToValueAtTime(18000, at + 0.05);
     f.exponentialRampToValueAtTime(380, at + (end - at) * 0.55); f.exponentialRampToValueAtTime(22000, end);
     q.setValueAtTime(1.1, end);
     this._mark('lpf', end);
@@ -118,7 +129,7 @@ export class FXRack {
   // then slams back on the downbeat
   singalong(at, beats) {
     const f = this.lp.frequency, gg = this.gate.gain, end = at + beats * this.spb;
-    f.cancelScheduledValues(at); this.lp.Q.cancelScheduledValues(at); this.lp.Q.setValueAtTime(1.1, at); f.setValueAtTime(22000, at); f.exponentialRampToValueAtTime(220, at + this.spb);
+    holdAt(f, at, 22000, end); holdAt(this.lp.Q, at, 1.1, end); this.lp.Q.linearRampToValueAtTime(1.1, at + 0.05); f.exponentialRampToValueAtTime(220, at + this.spb);
     f.setValueAtTime(220, end - 0.01); f.setValueAtTime(22000, end);
     gg.setValueAtTime(1, at); gg.linearRampToValueAtTime(0.3, at + this.spb); gg.setValueAtTime(0.3, end - 0.01); gg.setValueAtTime(1, end);
     this._mark('lpf', end);
@@ -126,11 +137,12 @@ export class FXRack {
   reverbThrow(at, beats) {
     const s = this.verbSend.gain, end = at + beats * this.spb;
     s.setValueAtTime(0, at); s.linearRampToValueAtTime(0.9, at + 0.02); s.setValueAtTime(0.9, end); s.linearRampToValueAtTime(0, end + 0.05);
+    s._end = Math.max(s._end ?? 0, end + 0.05);
     this._mark('reverb', end);
   }
   reverbWash(at, beats, peak = 0.7) {
     const s = this.verbSend.gain, end = at + beats * this.spb;
-    s.cancelScheduledValues(at); s.setValueAtTime(0, at); s.linearRampToValueAtTime(peak, end); s.setValueAtTime(0, end + 0.02);
+    holdAt(s, at, 0, end + 0.02); s.linearRampToValueAtTime(peak, end); s.setValueAtTime(0, end + 0.02);
     this._mark('reverb', end);
   }
 }

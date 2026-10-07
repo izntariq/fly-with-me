@@ -3,6 +3,7 @@
 // hits are vertical lines, so a median filter along time keeps the harmonic part and one along frequency keeps the
 // percussive part. Soft (Wiener) masks from those split every STFT frame; overlap-add rebuilds each stem.
 //   in:  { id, L, R, sr }          out: { id, drums: [L, R], music: [L, R] }  (+ {id, progress} messages)
+//                                  or   { id, error } (a long track can outgrow memory: the job fails, the worker lives)
 
 const N = 2048, HOP = 512, B = N / 2 + 1, KT = 17, KF = 17;
 const win = new Float32Array(N);
@@ -41,7 +42,11 @@ function median(get, lo, hi) {
 }
 
 self.onmessage = (e) => {
-  const { id, L, R, sr } = e.data, len = L.length, F = Math.ceil(len / HOP) + 1;
+  try { split(e.data); } catch (err) { self.postMessage({ id: e.data.id, error: String(err?.message || err) }); }
+};
+
+function split({ id, L, R }) {
+  const len = L.length, F = Math.ceil(len / HOP) + 1;
   const re = new Float64Array(N), im = new Float64Array(N);
   const frame = (x, f) => { const o = f * HOP - N / 2; for (let i = 0; i < N; i++) { const s = o + i; re[i] = s >= 0 && s < len ? x[s] * win[i] : 0; im[i] = 0; } };
 
@@ -85,4 +90,4 @@ self.onmessage = (e) => {
   }
   const drums = [out[0][0], out[1][0]], music = [out[0][1], out[1][1]];
   self.postMessage({ id, drums, music }, [drums[0].buffer, drums[1].buffer, music[0].buffer, music[1].buffer]);
-};
+}

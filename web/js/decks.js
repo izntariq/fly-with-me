@@ -1,7 +1,7 @@
 // Two-deck DJ mixer: per-deck EQ, filter, loop roll, echo throw, backspin, scratching, brake, hot cues;
 // equal-power crossfader; master bus runs through the FX rack.
 
-import { FXRack, Sampler } from './fx.js';
+import { FXRack, Sampler, holdAt } from './fx.js';
 
 export class Mixer {
   constructor(ctx) {
@@ -30,6 +30,8 @@ export class Mixer {
 
     this.sampler = new Sampler(ctx, limiter, this.echoIn);
     this.decks = [new Deck(ctx, 'A', this), new Deck(ctx, 'B', this)];
+    // beat FX run on the beat you hear (the on-air deck's grid), which is twice or half the master on a folded track
+    this.fx.beat = () => { const d = this.onAir(); return d.playing && d.bpm ? 60 / d.bpm : 60 / this.bpm; };
     this.lockUntil = 0;   // a scheduled cut owns the crossfader until then
     this.x = 0; // 0 = full A, 1 = full B
     this.setCrossfader(0);
@@ -49,8 +51,15 @@ export class Mixer {
     for (const d of this.decks) d.setKeylock(this.keylock);
   }
 
-  // playback rate that puts `track` at `bpm` (folding half/double time)
-  rateFor(track, bpm) { let r = bpm / track.bpm; if (r > 1.4) r /= 2; else if (r < 0.7) r *= 2; return r; }
+  // playback rate that puts `track` at `bpm`, folding half / double time. The fold is picked once per load (and again if
+  // the track's tempo is corrected) and then kept: re-folding as the master tempo moves would halve or double the rate
+  // in one step when a glide or the ride crosses the fold point
+  rateFor(track, bpm) {
+    if (track._foldBpm !== track.bpm) { const r = bpm / track.bpm; track._fold = r > 1.4 ? 0.5 : r < 0.7 ? 2 : 1; track._foldBpm = track.bpm; }
+    return bpm / track.bpm * track._fold;
+  }
+  // the master tempo at which `track` plays at its own speed (its BPM in the set's frame, after the fold)
+  tempoOf(track) { return track.bpm / (track._foldBpm === track.bpm ? track._fold : 1); }
   // master tempo: every playing deck follows it, phase stays locked because they all change at the same instant
   applyTempo(bpm) {
     this.masterBpm = bpm;
@@ -60,7 +69,8 @@ export class Mixer {
   setTempo(bpm) {
     this.bpm = bpm;
     if (this.fx) this.fx.bpm = bpm;
-    this.delay.delayTime.setTargetAtTime(0.75 * 60 / bpm, this.ctx.currentTime, 0.05);
+    // slowly: retuning a delay that is still ringing bends the pitch of its tail (an echo out into a new tempo)
+    this.delay.delayTime.setTargetAtTime(0.75 * 60 / bpm, this.ctx.currentTime, 0.5);
   }
   setCrossfader(x) {
     this.x = Math.min(1, Math.max(0, x));
@@ -68,15 +78,24 @@ export class Mixer {
     this.decks[0].xf.gain.setTargetAtTime(Math.cos(this.x * Math.PI / 2), t, 0.02);
     this.decks[1].xf.gain.setTargetAtTime(Math.sin(this.x * Math.PI / 2), t, 0.02);
   }
-  // hard cut of the crossfader at an exact (beat-aligned) time
+  // hard cut of the crossfader at an exact (beat-aligned) time, over ~5 ms so a sustained bass doesn't click
   cutTo(x, at) {
     const [A, B] = this.decks;
     A.xf.gain.cancelScheduledValues(at); B.xf.gain.cancelScheduledValues(at);
-    A.xf.gain.setValueAtTime(Math.cos(x * Math.PI / 2), at);
-    B.xf.gain.setValueAtTime(Math.sin(x * Math.PI / 2), at);
+    A.xf.gain.setTargetAtTime(Math.cos(x * Math.PI / 2), at, 0.0012);
+    B.xf.gain.setTargetAtTime(Math.sin(x * Math.PI / 2), at, 0.0012);
     this.lockUntil = at + 0.05;
-    setTimeout(() => { this.x = x; }, Math.max(0, (at - this.ctx.currentTime) * 1000));
+    // the fader position takes the cut when the audio clock gets there (read through `x`), not on a main-thread timer:
+    // a hidden page's timers can run a second late while the control loop (a worker's timer) keeps ticking, and in
+    // that second the fly would see the old deck still on air and line up another transition
+    this._cuts = [...(this._cuts || []).filter((c) => c.at < at), { x, at }];
   }
+  get x() {
+    const now = this.ctx.currentTime;
+    while (this._cuts?.length && this._cuts[0].at <= now) this._x = this._cuts.shift().x;
+    return this._x;
+  }
+  set x(v) { this._x = v; }
   onAir() { return this.x < 0.5 ? this.decks[0] : this.decks[1]; }
   offAir() { return this.x < 0.5 ? this.decks[1] : this.decks[0]; }
   // how audible each deck is (0..1)
@@ -159,6 +178,7 @@ export class Deck {
     this.setStem('drums', true); this.setStem('music', true);
     this.anchorPos = track.cue ?? track.firstBeat;
     this.rate = 1;
+    track._foldBpm = null;                // the half / double-time fold is picked afresh against the tempo it joins
   }
 
   get hasStems() { return !!this.track?.stems; }
@@ -252,9 +272,12 @@ export class Deck {
     this._syncPitch(now);
   }
 
-  setEQ(band, db) {
-    this.eqVals[band] = db;
-    this[band].gain.setTargetAtTime(db <= -23.5 ? -40 : db, this.ctx.currentTime, 0.03);
+  // `at`: a ctx time to schedule it for (on the audio clock, so a kill lands with the cut it goes with; the EQ sits after
+  // the key-lock shifter, so no latency offset)
+  setEQ(band, db, at = null) {
+    const now = this.ctx.currentTime, t = at == null ? now : Math.max(now, at);
+    this[band].gain.setTargetAtTime(db <= -23.5 ? -40 : db, t, at == null ? 0.03 : 0.008);
+    if (t <= now + 0.01) this.eqVals[band] = db; else setTimeout(() => { this.eqVals[band] = db; }, (t - now) * 1000);
   }
   // -1 = full lowpass, 0 = open, +1 = full highpass
   setFilter(v) {
@@ -306,18 +329,18 @@ export class Deck {
   echoThrow(at, beats = 1) {
     const spb = 60 / (this.track?.bpm || 120) / this.rate;
     const g = this.echoSend.gain;
-    g.setValueAtTime(0, at); g.linearRampToValueAtTime(0.9, at + 0.01);
+    holdAt(g, at, 0, at + beats * spb + 0.02); g.linearRampToValueAtTime(0.9, at + 0.01);   // a throw inside another one extends it, no gap
     g.setValueAtTime(0.9, at + beats * spb); g.linearRampToValueAtTime(0, at + beats * spb + 0.02);
   }
 
-  get reversed() {
-    const t = this.track;
-    if (!t.rev) {
-      const b = t.buffer, r = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate);
-      for (let c = 0; c < b.numberOfChannels; c++) { const s = b.getChannelData(c), d = r.getChannelData(c); for (let i = 0, n = s.length; i < n; i++) d[i] = s[n - 1 - i]; }
-      t.rev = r;
-    }
-    return t.rev;
+  // the track between positions `from` and `to` (seconds), reversed: sample i is the track at `to` − i / rate. Only the
+  // few seconds a move needs, not a reversed copy of the whole track (~100 MB) kept for the rest of the set
+  reversedWindow(from, to) {
+    const b = this.track.buffer, sr = b.sampleRate;
+    const i0 = Math.max(0, Math.floor(from * sr)), i1 = Math.min(b.length, Math.ceil(to * sr)), n = Math.max(1, i1 - i0);
+    const r = this.ctx.createBuffer(b.numberOfChannels, n, sr);
+    for (let c = 0; c < b.numberOfChannels; c++) { const s = b.getChannelData(c), d = r.getChannelData(c); for (let i = 0; i < n; i++) d[i] = s[i1 - 1 - i] ?? 0; }
+    return { buf: r, to: i1 / sr };
   }
 
   // position (seconds) of beat index b of the track
@@ -332,11 +355,11 @@ export class Deck {
     const p = this.posOfBeat(Math.floor(this.beatAt(at)));         // the hit on the current beat
     const len = 0.11;                                                 // seconds of record under the hand per stroke
     const strokeDur = kind === 'chirp' ? spb / 4 : spb / 2;
-    const rev = this.reversed, D = this.track.buffer.duration;
+    const rev = this.reversedWindow(Math.max(0, p - 0.1), p + len);
     const out = this.ctx.createGain(); out.connect(this.fxIn);
     for (let t = at, k = 0; t < at + dur - 1e-3; t += strokeDur, k++) {
       const fwd = k % 2 === 0, src = this.ctx.createBufferSource(), g = this.ctx.createGain();
-      src.buffer = fwd ? this.track.buffer : rev;
+      src.buffer = fwd ? this.track.buffer : rev.buf;
       const peak = 2 * len / strokeDur;                              // triangle hand motion covers `len` seconds
       src.playbackRate.setValueAtTime(0.05, t);
       src.playbackRate.linearRampToValueAtTime(peak, t + strokeDur / 2);
@@ -350,7 +373,7 @@ export class Deck {
       if (kind === 'crab') for (let c = 0; c < 4; c++) { const u = t + strokeDur * (0.15 + c * 0.18); gg.setValueAtTime(0, u); gg.setValueAtTime(1, u + strokeDur * 0.07); }
       gg.linearRampToValueAtTime(0, t + strokeDur);
       src.connect(g); g.connect(out);
-      src.start(t, fwd ? p : Math.max(0, D - p - len)); src.stop(t + strokeDur + 0.01);
+      src.start(t, fwd ? p : Math.max(0, rev.to - p - len)); src.stop(t + strokeDur + 0.01);   // back from p + len
     }
     this._duck(at, dur);
   }
@@ -385,12 +408,13 @@ export class Deck {
   // play the next `beats` of the track backwards (Pioneer-style reverse), slipping back in afterwards
   reverse(at, beats = 1) {
     if (!this.track || !this.playing) return;
-    const spbT = 60 / this.track.bpm, dur = beats * spbT / this.rate, p = this.position(at), D = this.track.buffer.duration;
+    const spbT = 60 / this.track.bpm, dur = beats * spbT / this.rate, p = this.position(at);
+    const rev = this.reversedWindow(p, p + beats * spbT);
     const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
-    src.buffer = this.reversed; src.playbackRate.value = this.rate;
+    src.buffer = rev.buf; src.playbackRate.value = this.rate;
     g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(1, at + 0.01); g.gain.setValueAtTime(1, at + dur - 0.01); g.gain.linearRampToValueAtTime(0, at + dur);
     src.connect(g); g.connect(this.fxIn);
-    src.start(at, Math.max(0, D - p - beats * spbT)); src.stop(at + dur + 0.02);
+    src.start(at, Math.max(0, rev.to - p - beats * spbT)); src.stop(at + dur + 0.02);
     this._duck(at, dur);
   }
 

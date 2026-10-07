@@ -74,7 +74,7 @@ long a track stays on, its home tempo, and what it hypes the crowd with.
 | Snare-roll build | Garrix, Guetta, Tiësto (convention) | Snare roll accelerating 1/4 → 1/8 → 1/16 → 1/32, rising in pitch and level, over the HPF sweep and riser |
 | Stutter build / edit | Skrillex (convention) | Hard 1/8 → 1/32 rolls with bit-crush and a steep pitch rise; 1/32 roll plus gate |
 | Filter build | house / techno | Long HPF sweep and reverb wash, no roll, no horn; the groove never stops |
-| Double drop | big room (convention) | Both decks jump to their drop cue on the same beat with one bassline, then settle on the new deck after 16 bars |
+| Double drop | big room (convention) | Both decks jump to their drop cue on the same beat with one bassline, then settle on the new deck. The fly sizes it to what the outgoing track has left: whole 4-bar phrases, up to 16 bars (a drop swap if under 4); the pad plays 16 |
 | Mashup | Guetta, SHM, Diplo, DJ Snake | The other deck's mids (bass cut, highs down) layered over the current one for a phrase |
 | Loop layering | Hawtin, Carl Cox, SHM | A bar of the other deck, high-passed above 450 Hz, looped under the mix for 8 bars |
 | Dub delay throw | Hawtin's foot pedal | One 1/4-beat hit into the echo with feedback raised to 0.72 |

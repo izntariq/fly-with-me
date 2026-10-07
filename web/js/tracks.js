@@ -120,14 +120,29 @@ const linfit = (xs, ys) => {
 
 // robust bar grid through downbeat times. Numbering the downbeats 0, 1, 2 ... breaks on one missed or extra downbeat:
 // every later index shifts and skews the whole fit, even the tempo. So number them by their spacing (bar by bar, then
-// against the fitted grid), fit a line, and refit without the outliers. off: the share of downbeats that are neither
-// on the line nor at a half bar (the tracker adds those in places; they cost nothing, and neither do bars with no
-// downbeat at all, as in a beatless breakdown): what a fixed grid can't explain
+// against the fitted grid), fit a line, and refit without the outliers. Bar by bar means from the last downbeat that
+// sat on the grid (an anchor), not from the one before: All-In-One adds downbeats at half a bar, singly or for whole
+// double-time sections, and round(gap / bar) of a half bar is a coin toss that shifts every later index. From the
+// anchor an extra is just a downbeat between two bar lines, left out of the first fit, and a missed one or a beatless
+// stretch is a whole number of bars.
+// off: the share of downbeats that are neither on the line nor at a half bar (the tracker adds those in places; they
+// cost nothing, and neither do bars with no downbeat at all, as in a beatless breakdown): what a fixed grid can't explain
 function barGrid(db) {
-  const gaps = db.slice(1).map((v, i) => v - db[i]).sort((p, q) => p - q), med = gaps[gaps.length >> 1];
-  let idx = [0];
-  for (let i = 1; i < db.length; i++) idx.push(idx[i - 1] + Math.round((db[i] - db[i - 1]) / med));   // 0: an extra
-  let fit = linfit(idx, db), keep = idx.map(() => true);
+  const gaps = db.slice(1).map((v, i) => v - db[i]), med = [...gaps].sort((p, q) => p - q)[gaps.length >> 1];
+  const whole = (u) => u > 0.75 && Math.abs(u - Math.round(u)) < 0.25;
+  // runs of anchors, each on one grid. An off-grid downbeat followed by a whole bar starts a new run: the bar line
+  // really moved (a bar of 2 beats, a pickup, a section in another tempo). The first fit is on the longest run
+  let idx = db.map(() => 0), run = db.map(() => -1), j = -1, nRuns = 0;
+  for (let i = 0; i < db.length; i++) {
+    const u = j < 0 ? 0 : (db[i] - db[j]) / med;
+    if (j >= 0 && whole(u)) { idx[i] = idx[j] + Math.round(u); run[i] = run[j]; j = i; }
+    else if (i + 1 < db.length && whole(gaps[i] / med)) { run[i] = nRuns++; j = i; }
+  }
+  const len = Array.from({ length: nRuns }, (_, r) => run.filter((x) => x === r).length), best = len.indexOf(Math.max(...len));
+  // tail: where the last run starts (the grid the track ends on, after its last bar-line move)
+  const lastRun = run.findLast((r) => r >= 0), tail = run.indexOf(lastRun);
+  if (!(len[best] >= 2)) return { m: med, b: db[0], drift: Infinity, off: 1, bars: 0, tail };
+  let fit = linfit(idx.filter((_, i) => run[i] === best), db.filter((_, i) => run[i] === best)), keep;
   for (let pass = 0; pass < 2; pass++) {
     idx = db.map((y) => Math.round((y - fit.b) / fit.m));
     keep = idx.map((k, i) => Math.abs(db[i] - (fit.b + fit.m * k)) < fit.m / 4);
@@ -136,8 +151,16 @@ function barGrid(db) {
   }
   const on = new Set(idx.filter((_, i) => keep[i])), nIn = keep.filter(Boolean).length;
   const drift = Math.sqrt(db.reduce((p, y, i) => p + (keep[i] ? (y - (fit.b + fit.m * idx[i])) ** 2 : 0), 0) / Math.max(1, nIn));
-  const off = db.filter((y, i) => { const f = Math.abs((y - fit.b) / fit.m - idx[i]); return !keep[i] && Math.abs(f - 0.5) >= 0.125; }).length / db.length;
-  return { ...fit, drift, off, bars: on.size };
+  // half-bar downbeats are free one at a time (the tracker's extras), but 4 or more in a row with none on the line is
+  // the bar line itself moving by half a bar (a bar of 2 beats at a bridge): from there on this grid is 2 beats out
+  const half = db.map((y, i) => { const f = Math.abs((y - fit.b) / fit.m - idx[i]); return !keep[i] && Math.abs(f - 0.5) < 0.125; });
+  const offAt = db.map((y, i) => { const f = Math.abs((y - fit.b) / fit.m - idx[i]); return !keep[i] && Math.abs(f - 0.5) >= 0.125; });
+  for (let i = 0, j; i < db.length; i = j + 1) {
+    for (j = i; j < db.length && half[j]; j++);
+    if (j - i >= 4) for (let k = i; k < j; k++) offAt[k] = true;
+  }
+  const off = offAt.filter(Boolean).length / db.length;
+  return { ...fit, drift, off, bars: on.size, tail };
 }
 
 export function applyAnalysis(t, a) {
@@ -148,25 +171,56 @@ export function applyAnalysis(t, a) {
   const end = a.segments?.length ? a.segments[a.segments.length - 1].end : db[db.length - 1];
   if (Math.abs(end - t.buffer.duration) > 3) { t.analysisRejected = 'length mismatch'; return false; }
   // a track that changes tempo (a beat switch, a half-time section) has no one grid; then fit its end, where the
-  // DJ mixes out, and cut rather than blend
-  let fit, part = 1;
-  for (part of [1, 0.5, 0.3]) { fit = barGrid(db.slice(Math.floor(db.length * (1 - part)))); if (fit.off <= 0.1 && fit.bars >= 8) break; }
-  const t0 = db[Math.floor(db.length * (1 - part))];
-  if (!(fit.off <= 0.1 && fit.bars >= 8)) { t.analysisRejected = 'no steady grid'; return false; }
-  // beats per bar: 3 for waltzes and 6/8 ballads (the app counts 4-beat bars, so these get the beat tempo and no
-  // phrase-matched blends), else 4
+  // DJ mixes out, and cut rather than blend. No one grid: too many downbeats off it, a line half a beat out on
+  // average, or a line through both tempos that misses the end by over 1/32 bar (rms, and at most 60 ms: a blend that
+  // far out flams) where the end's own line is 3x closer. A line that's merely loose all through (a band without a
+  // click) stays: any shorter stretch of a wandering tempo fits tighter
+  const parts = [1, 0.5, 0.3], from = (p) => Math.round(db.length * (1 - p));
+  // and the stretch after the track's last bar-line move (a bar of 2 beats near the end), if it is a different one
+  const whole = barGrid(db), tailPart = (db.length - whole.tail) / db.length;
+  if (whole.tail > 0 && db.length - whole.tail >= 8 && !parts.some((p) => Math.abs(p - tailPart) < 0.02)) parts.push(tailPart);
+  parts.sort((p, q) => q - p);
+  const fits = parts.map((p) => barGrid(db.slice(from(p))));
+  const good = (f) => f.off <= 0.1 && f.bars >= 8 && f.drift <= f.m / 8;
+  const miss = (f, ys) => {
+    let s = 0, n = 0;
+    for (const y of ys) { const u = (y - f.b) / f.m, e = Math.abs(u - Math.round(u)) * f.m; if (e < f.m / 4) { s += e * e; n++; } }
+    return Math.sqrt(s / Math.max(1, n));
+  };
+  let k = fits.findIndex(good);
+  while (k >= 0 && k + 1 < parts.length && good(fits[k + 1])) {
+    const e = miss(fits[k], db.slice(from(parts[k + 1])));
+    if (!(e > Math.min(fits[k].m / 32, 0.06) && e > 3 * fits[k + 1].drift)) break;
+    k++;
+  }
+  // no fixed grid fits even the end: the app's own (one tempo) won't either, so no beat-matched blends
+  if (k < 0) { t.analysisRejected = 'no steady grid'; t.steady = false; return false; }
+  const fit = fits[k], part = parts[k], t0 = db[from(part)];
+  // beats per bar, the bar over All-In-One's beat: 4, or 3 for waltzes and 6/8 ballads (the app counts 4-beat bars,
+  // so these get the beat tempo and no phrase-matched blends). 2: two downbeats a bar, a double-time downbeat grid; the
+  // bar is two of them, from the line that carries more downbeats (both land on beats, so the beats can't choose).
+  // 8: a downbeat every other bar. 5, 6, 7 (5/4, 6/8 counted in eighths, 7/8) or a bar that isn't a whole number of
+  // beats (the beats and downbeats disagree): the beat tempo (6 and 8 halved if over 220) and no blends
   const bt = (a.beats || []).filter((x) => x >= t0), bg = bt.slice(1).map((v, i) => v - bt[i]).sort((p, q) => p - q);
-  const bpb = bg.length > 8 && Math.round(fit.m / bg[bg.length >> 1]) === 3 ? 3 : 4;
-  const bpm = 60 * bpb / fit.m, drift = fit.drift;
-  if (!(bpm > 50 && bpm < 220)) { t.analysisRejected = 'tempo'; return false; }
+  const ratio = bg.length > 8 ? fit.m / bg[bg.length >> 1] : 4, clean = Math.abs(ratio - Math.round(ratio)) < 0.2;
+  let beats = clean ? Math.max(1, Math.round(ratio)) : 4;
+  while (beats > 4 && beats % 2 === 0 && 60 * beats / fit.m >= 220) beats /= 2;
+  // (a bar that isn't a whole number of beats: the beat tempo itself, so rolls and beat FX land on the beats)
+  const bpb = beats === 2 || beats === 8 ? 4 : beats, bpm = clean || bg.length <= 8 ? 60 * beats / fit.m : 60 / bg[bg.length >> 1], drift = fit.drift;
+  if (!(bpm > 50 && bpm < 220)) { t.analysisRejected = 'tempo'; if (!clean || bpb !== 4) t.steady = false; return false; }
   const bar = 240 / bpm;                                           // the app's 4-beat bar
   let first = fit.b;
+  if (beats === 2) {
+    const on = (ph) => db.slice(from(part)).filter((y) => { const u = ((y - fit.b) / fit.m - ph) / 2; return Math.abs(u - Math.round(u)) < 0.125; }).length;
+    if (on(1) > on(0)) first += fit.m;
+  }
   first -= Math.floor(first / bar) * bar;                          // the first bar line at or after 0 s
   t.appGrid = { bpm: t.bpm, firstBeat: t.firstBeat };
   t.bpm = Math.round(bpm * 100) / 100; t.firstBeat = first; t.gridDrift = drift; t.gridSource = 'analysed'; t.meter = bpb;
   // the tempo really moves (live drummers, rubato, metre changes): a fixed grid drifts off by more than 1/16 bar, so
-  // beat-matched blends would drift out of time; the DJ cuts in and out of these instead
-  t.steady = part === 1 && bpb === 4 && drift <= fit.m / 16 && fit.off <= 0.05;
+  // beat-matched blends would drift out of time; the DJ cuts in and out of these instead (and of any bar that isn't
+  // 4 whole beats)
+  t.steady = part === 1 && clean && bpb === 4 && drift <= bar / 16 && fit.off <= 0.05;
   const nb = Math.max(1, Math.floor((t.buffer.duration - first) / bar));
   const segs = (a.segments || []).map((g) => [g.start, g.end, SECTION_OF[g.label] || 'verse']);
   t.sections = Array.from({ length: nb }, (_, b) => {

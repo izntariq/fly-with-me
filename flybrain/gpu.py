@@ -62,8 +62,8 @@ def _integrate_src(p: Params, dv_decay, g_decay, k_gv, n_ref, kick):
             }}
         }}
         if (pk > 0.0f && rnd(seed, step0 + s, gid) < pk) {{      // Poisson kick, lands on v immediately
-            vi += {kick}f;
-            if (vi > {p.v_th}f) {{ vi = {p.v_rst}f; gi = 0.0f; mask |= (1u << s); }}
+            vi += {kick}f;              // as on the CPU: no threshold while refractory; a kick spike is refractory
+            if (ri == 0 && vi > {p.v_th}f) {{ vi = {p.v_rst}f; gi = 0.0f; ri = {n_ref}; mask |= (1u << s); }}
         }}
     }}
     v_out[gid] = vi; g_out[gid] = gi; ref_out[gid] = ri; spk[gid] = (uint8_t)mask;
@@ -168,11 +168,11 @@ class GPUBrains:
         self.stim[k] = (np.asarray(idx, np.int64), np.asarray(rates_hz, np.float64))
 
     def _pstim(self):
-        ps = np.zeros(self.BN, np.float32)
-        for k, (idx, r) in enumerate(self.stim):
-            if len(idx):
-                ps[k * self.n + idx] = np.clip(r * self.p.dt * 1e-3, 0, 1)
-        return mx.array(ps)
+        # a neuron listed twice (two channels, or a channel and a poke) gets the sum of its rates, as on the CPU,
+        # where each listing kicks it independently (an assignment here would keep only the last)
+        idx = np.concatenate([k * self.n + i for k, (i, _) in enumerate(self.stim)])
+        rate = np.bincount(idx, weights=np.concatenate([r for _, r in self.stim]), minlength=self.BN)
+        return mx.array(np.clip(rate * self.p.dt * 1e-3, 0, 1).astype(np.float32))
 
     # ---- simulation ----
     def run(self, ms: float, watch: np.ndarray | None = None):

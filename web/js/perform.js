@@ -13,6 +13,7 @@ export class Performer {
   constructor(mixer, synth, log) {
     this.mixer = mixer; this.fx = mixer.fx; this.sampler = mixer.sampler; this.synth = synth; this.log = log;
     this.busyUntil = 0;           // a build-up in progress blocks other big moves
+    this.holdUntil = 0;           // events are scheduled on the audio clock until then: the master tempo must stay put
     this.onActivity = null;       // (name) => void, for lighting pads
     this.onBuild = null;          // (T0, Td) => void, e.g. the MC hyping the drop
     this.buildKind = null;        // () => 'roll' | 'snare' | 'stutter' | 'filter'
@@ -25,6 +26,9 @@ export class Performer {
   nextBeat() { const d = this.on; return d.playing ? d.nextBeatTime(1) : this.ctx.currentTime + 0.05; }
   nextBar() { const d = this.on; return d.playing ? d.nextBarTime() : this.ctx.currentTime + 0.05; }
   busy() { return this.ctx.currentTime < this.busyUntil; }
+  // a move whose cuts / restores / booms are fixed ctx times worked out from the current rate: a tempo change before
+  // `end` would move the bar lines away from them
+  _hold(end) { this.holdUntil = Math.max(this.holdUntil, end + 0.02); return end; }
   _lit(name) { this.onActivity?.(name); }
 
   // ---------------- beat FX ----------------
@@ -134,6 +138,7 @@ export class Performer {
     if (horn) this.sampler.airhorn(Td + 0.01);
     this.synth.zap?.(Td);
     this.busyUntil = Td + 2 * spb;
+    this._hold(Td);
     this.onBuild?.(T0, Td);
     this._lit('build');
     const name = { roll: 'cue build', snare: 'snare-roll build', stutter: 'stutter build', filter: 'filter build' }[kind];
@@ -162,13 +167,14 @@ export class Performer {
     }
     // duck the track a little so the chops sit on top
     on._duck(T0, bars * 4 * spb, 0.45);             // the track stays underneath at 45% (shared duck schedule)
+    this._hold(T0 + bars * 4 * spb);
     this._lit('chop');
     this.log(`${who || 'you'} → <b>live chops</b> of "${on.track.name}" for ${bars} bars`);
     return T0;
   }
 
   // double drop: both decks hit their drop together (one bassline kept), then settle on the other deck
-  doubleDrop({ bars = 16, who = '' } = {}) {
+  doubleDrop({ bars = 16, who = '' } = {}) {      // bars: the caller keeps it inside what's left of the outgoing track
     const on = this.on, off = this.off;
     if (!off.playing || this.busy()) return false;
     const Td = this.buildDrop({ bars: 2, kind: 'snare', who });
@@ -178,11 +184,12 @@ export class Performer {
     if (dOff) off.jumpTo(Td, off.posOfBeat(dOff.beat));
     this.mixer.cutTo(0.5, Td);
     const spb = 60 / on.track.bpm / on.rate, end = Td + bars * 4 * spb;
-    setTimeout(() => off.setEQ('low', -24), Math.max(0, (Td - this.ctx.currentTime) * 1000));
+    off.setEQ('low', -24, Td);
     this.mixer.cutTo(off === this.mixer.decks[0] ? 0 : 1, end);
-    setTimeout(() => off.setEQ('low', 0), Math.max(0, (end - this.ctx.currentTime) * 1000));
+    off.setEQ('low', 0, end);
     this.mixer.lockUntil = end + 0.05;
     this.busyUntil = end;
+    this._hold(end);
     this.log(`${who || 'you'} → <b>double drop</b>: decks ${on.name} + ${off.name} together for ${bars} bars`);
     return end;
   }
@@ -197,14 +204,12 @@ export class Performer {
     if (off.hasStems) {
       // a real acapella-style layer: the other deck's music stem, its drums muted, bass trimmed
       off.setStem('drums', false, T0); off.setStem('drums', true, end);
-      setTimeout(() => off.setEQ('low', -12), Math.max(0, (T0 - this.ctx.currentTime) * 1000));
-      setTimeout(() => off.setEQ('low', 0), Math.max(0, (end - this.ctx.currentTime) * 1000));
+      off.setEQ('low', -12, T0); off.setEQ('low', 0, end);
     } else {
-      const kill = () => { off.setEQ('low', -24); off.setEQ('high', -8); }, back = () => { off.setEQ('low', 0); off.setEQ('high', 0); };
-      setTimeout(kill, Math.max(0, (T0 - this.ctx.currentTime) * 1000));
-      setTimeout(back, Math.max(0, (end - this.ctx.currentTime) * 1000));
+      off.setEQ('low', -24, T0); off.setEQ('high', -8, T0); off.setEQ('low', 0, end); off.setEQ('high', 0, end);
     }
     this.mixer.lockUntil = end + 0.05;
+    this._hold(end);
     this._lit('mashup');
     this.log(`${who || 'you'} → <b>mashup</b>: "${off.track.name}" vocals over "${on.track.name}" for ${bars} bars`);
     return end;
@@ -220,6 +225,7 @@ export class Performer {
     const g = this.ctx.createGain(); g.gain.value = 0.7; hp.connect(g); g.connect(this.mixer.master);
     const bar = Math.floor(off.beatAt(T0) / 4) * 4;
     off.slice(T0, off.posOfBeat(bar), 4 * spbOff, { rate: off.rate, gain: 1, dest: hp, loopFor: bars * 4 * spb, buffer: off.hasStems ? off.track.stems.drums : null });
+    this._hold(T0 + bars * 4 * spb);                // the loop plays at today's rate
     this._lit('layer');
     this.log(`${who || 'you'} → <b>loop layer</b>: a bar of "${off.track.name}" looped under the mix for ${bars} bars`);
     return T0;
@@ -233,6 +239,7 @@ export class Performer {
     const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, end = T0 + bars * 4 * spb;
     on.setStem('drums', false, T0); on.setStem('drums', true, end);
     this.sampler.riser(end - 4 * spb, 4 * spb); this.sampler.boom(end);
+    this._hold(end);
     this._lit('drumsout');
     this.log(`${who || 'you'} → <b>drums out</b> for ${bars} bars, then back in`);
     return end;
@@ -243,6 +250,7 @@ export class Performer {
     if (!on.hasStems) return false;
     const T0 = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate, end = T0 + bars * 4 * spb;
     on.setStem('music', false, T0); on.setStem('music', true, end);
+    this._hold(end);
     this._lit('melodyout');
     this.log(`${who || 'you'} → <b>stripped to drums</b> for ${bars} bars`);
     return end;
@@ -258,8 +266,8 @@ export class Performer {
   // tease the drop: kill the bass for a bar, slam it back on the downbeat
   bassTease(who = '') {
     const on = this.on, at = on.nextBarTime(), spb = 60 / on.track.bpm / on.rate;
-    setTimeout(() => on.setEQ('low', -24), Math.max(0, (at - this.ctx.currentTime) * 1000));
-    setTimeout(() => on.setEQ('low', 0), Math.max(0, (at + 4 * spb - this.ctx.currentTime) * 1000));
+    on.setEQ('low', -24, at); on.setEQ('low', 0, at + 4 * spb);
+    this._hold(at + 4 * spb);
     this._lit('tease'); if (who) this.log(`${who} → bass out for a bar, slammed back in`);
   }
 
@@ -277,6 +285,7 @@ export class Performer {
     this.fx.singalong(at, bars * 4);
     this.sampler.boom(end); this.sampler.riser(end - 4 * spb, 4 * spb);
     this.busyUntil = Math.max(this.busyUntil, end);
+    this._hold(end);
     this._lit('singalong');
     this.log(`${who || 'you'} → <b>sing-along drop-out</b> for ${bars} bars, then slam back in`);
     return end;
@@ -294,6 +303,7 @@ export class Performer {
     const notes = pat.map((d) => (d < 0 ? null : root + sc[d % sc.length] + 12 * Math.floor(d / sc.length)));
     const accent = pat.map((d, k) => d >= 0 && (k % 4 === 0 || d > 5));
     this.sampler.acid(at, bars, this.spb, notes, accent);
+    this._hold(at + bars * 4 * this.spb);
     this._lit('acid');
     this.log(`${who || 'you'} → <b>live 303 acid line</b> for ${bars} bars`);
     return at;
@@ -306,6 +316,7 @@ export class Performer {
     this.fx.gap(land - 4 * this.spb, 4 * this.spb);
     this.mixer.cutTo(off === this.mixer.decks[0] ? 0 : 1, land);
     this.sampler.boom(land);
+    this._hold(land);
     this.log(`${who || 'you'} → <b>1-bar kill</b>, then deck ${off.name} hits`);
     return land;
   }
@@ -346,7 +357,9 @@ export class Performer {
     const at = on.nextBeatTime(1), spb = 60 / on.track.bpm / on.rate;
     on.backspin(at, 2);
     const land = on.timeOfBeat(Math.ceil(on.beatAt(at + 2 * spb) / 4 - 1e-4) * 4);
+    on._duck(at, land - at + 0.01);                 // the spin is 2 beats; the track stays muted until the cut is in
     this.mixer.cutTo(off === this.mixer.decks[0] ? 0 : 1, land);
+    this._hold(land);
     this.log(`${who || 'you'} → <b>spinback</b> deck ${on.name}, drop into deck ${off.name}`);
     return land;
   }

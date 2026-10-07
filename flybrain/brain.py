@@ -16,7 +16,9 @@ than real time on a laptop:
 
 External drive works like the paper's Poisson "optogenetic" activation: each
 stimulated neuron receives Poisson kicks of w_syn * f_poi (enough to fire it),
-except here every neuron has its own rate that can change every tick.
+except here every neuron has its own rate that can change every tick. As with
+Brian's PoissonInput, a kick still adds to v while the neuron is refractory but
+can't fire it then; a kick that fires it starts a refractory period like any spike.
 """
 from __future__ import annotations
 
@@ -81,7 +83,12 @@ def load_connectome():
     indptr = np.cumsum(indptr)
     ids = comp.index.to_numpy(np.int64)
     CACHE.parent.mkdir(exist_ok=True)
-    np.savez(CACHE, ids=ids, indptr=indptr, indices=indices, weights=weights)
+    # written whole, then renamed: an interrupted write can't leave a truncated cache that is loaded ever after
+    # (through a file object, so np.savez doesn't append .npz to the name)
+    tmp = CACHE.with_name(CACHE.name + ".part")
+    with open(tmp, "wb") as f:
+        np.savez(f, ids=ids, indptr=indptr, indices=indices, weights=weights)
+    os.replace(tmp, CACHE)
     return ids, indptr, indices, weights
 
 
@@ -147,7 +154,9 @@ def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
                     n_spk += 1
                 for s in range(indptr[i], indptr[i + 1]):
                     out[indices[s]] += weights[s]
-        # 3. Poisson drive; kicks land on v immediately, like Brian's PoissonInput
+        # 3. Poisson drive; kicks land on v immediately, like Brian's PoissonInput. A refractory neuron (including one
+        # that just spiked this step) takes the kick but isn't checked against threshold, so it can't spike twice in
+        # a step; a kick-caused spike starts a refractory period too
         for j in range(stim_idx.shape[0]):
             p = rates_p[j]
             if p <= 0.0:
@@ -155,9 +164,10 @@ def _run(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates_p,
             if np.random.random() < p:
                 i = stim_idx[j]
                 v[i] += kick
-                if v[i] > v_th:
+                if ref[i] == 0 and v[i] > v_th:
                     v[i] = v_rst
                     g[i] = 0.0
+                    ref[i] = n_ref
                     if n_spk < cap:
                         spk_idx[n_spk] = i
                         spk_step[n_spk] = step
@@ -233,7 +243,7 @@ def _run_active(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates
                         continue
                     continue
             k += 1
-        for jj in range(stim_idx.shape[0]):
+        for jj in range(stim_idx.shape[0]):           # Poisson drive, as in _run (refractory: no threshold)
             p = rates_p[jj]
             if p <= 0.0:
                 continue
@@ -244,9 +254,10 @@ def _run_active(n_steps, step0, v, g, ref, ring, indptr, indices, weights, rates
                     flag[i] = 1
                     act[n_act] = i
                     n_act += 1
-                if v[i] > v_th:
+                if ref[i] == 0 and v[i] > v_th:
                     v[i] = v_rst
                     g[i] = 0.0
+                    ref[i] = n_ref
                     if n_spk < cap:
                         spk_idx[n_spk] = i
                         spk_step[n_spk] = step
