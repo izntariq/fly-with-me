@@ -1,9 +1,12 @@
-// Section sense v2 (flybrain/sections.py, brains/sections_*.json): where a listener fly's deck is in its track.
+// Section sense (flybrain/sections.py, brains/sections_<brain>.json, spec version 2 or 3): where a listener fly's
+// deck is in its track.
 //
 // Each bar of the deck's own beat grid, the fly's output neurons are pooled by cell type into rates. Those are
-// log-scaled and normalised against this track so far, plus the previous 4 bars' mean, then go through a logistic
-// classifier trained on real tracks. An online HMM keeps the sections in order (intro -> main <-> break -> outro),
-// weighing in how much of the track is left. The result: section + confidence, updated on every bar line.
+// log-scaled and normalised against this track so far, plus the previous 4 bars' mean (v3 specs with "energy" add
+// the app's per-bar energy, normalised the same way), then go through a logistic classifier trained on real tracks.
+// An online HMM keeps the sections in order, weighing in how far into the track the deck is: v3 uses the arrangement
+// learned from labelled tracks (T, start, pos), v2 the hand-set intro -> main <-> break -> outro. The result: section
+// + confidence, updated on every bar line. tools/test_sections_parity.mjs checks this against the Python.
 
 export class SectionSense {
   constructor(spec, outputs, deck) {
@@ -76,7 +79,10 @@ export class SectionSense {
     const m = Math.max(...logit), e = logit.map((v) => Math.exp(v - m)), se = e.reduce((p, q) => p + q, 0);
     const P = e.map((v) => v / se);
     // online HMM: section order + how far into the track we are
-    const frac = Math.min(1, Math.max(0, this.deck.position() / Math.max(1, this.deck.duration)));
+    // track position as training measured it (sections.py): the closing bar's midpoint over the bars from the first
+    // beat, not the playhead over the file (which counts the lead-in before the first beat and the end of the bar)
+    const t = this.deck.track, nBars = t?.bpm ? Math.floor((this.deck.duration - (t.firstBeat || 0)) * t.bpm / 240) : 0;   // whole bars, as analyzeEnergy counts them
+    const frac = Math.min(1, Math.max(0, nBars > 0 ? (this.bar + 0.5) / nBars : this.deck.position() / Math.max(1, this.deck.duration)));
     const prior = this.pos ? this.pos[Math.min(this.pos.length - 1, Math.floor(frac * this.pos.length))]
       : [Math.exp(-frac / 0.12), 1, 0.5, Math.exp(-(1 - frac) / 0.10)].map((v) => v + 1e-3);
     const a = new Array(this.K).fill(0);

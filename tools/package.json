@@ -2,5 +2,8 @@
   "name": "fly-brain-dj-tools",
   "private": true,
   "type": "module",
-  "devDependencies": { "playwright-core": "*" }
+  "scripts": {
+    "test": "node test_dj_logic.mjs && node test_sections_parity.mjs"
+  },
+  "devDependencies": { "playwright-core": "1.63.0" }
 }

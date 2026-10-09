@@ -1,9 +1,8 @@
 // How long does the fly keep each track on air? Runs the app headless and logs every stretch a deck is fully on air.
 //   PORT=8766 node tools/onairtest.mjs 240
-import { chromium } from './node_modules/playwright-core/index.mjs';
-const secs = +(process.argv[2] || 240), port = process.env.PORT || 8765;
-const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+import { launchChrome } from './chrome.mjs';
+const secs = +(process.argv[2] || 240), port = process.env.PORT || 8766;
+const browser = await launchChrome({ headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage();
 await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
 const errs = [];

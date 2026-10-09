@@ -64,6 +64,21 @@ ol#hist { list-style: none; margin: 10px 0 0; padding: 0; }
 .tick b { color: #c4cbda; font-weight: 600; }
 .keys { margin-top: 8px; font-size: 10px; }
 
+#safe { margin-top: 6px; padding: 2px 8px; font: inherit; font-size: 10px; color: var(--dim); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+#safe[aria-pressed="true"] { color: var(--a); border-color: var(--a); }
+#warn { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: var(--bg); }
+#warn[hidden] { display: none; }
+#warn .box { max-width: 460px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.035); }
+#warn h1 { margin: 0 0 10px; font-size: 14px; letter-spacing: .12em; color: var(--hot); }
+#warn p { margin: 0 0 10px; color: #c4cbda; }
+#warn .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+#warn button { padding: 7px 12px; font: inherit; color: var(--text); background: transparent; border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer; }
+#warn button:focus-visible, #safe:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+#warn-safe { border-color: var(--a) !important; color: var(--a) !important; }
+
 #msg { position: fixed; left: 16px; bottom: 14px; color: var(--dim); font-size: 11px; }
 @media (max-width: 640px) {
   #side { width: auto; left: 16px; right: 16px; top: auto; bottom: 16px; transform: none; max-height: 45%; }
@@ -72,10 +87,23 @@ ol#hist { list-style: none; margin: 10px 0 0; padding: 0; }
 </style>
 </head>
 <body>
-<canvas id="gl"></canvas>
-<canvas id="hud"></canvas>
+<canvas id="gl" role="img" aria-label="The fly brains in 3D: every neuron a dot, every spike lit as it happens; drag to turn, scroll to zoom, click a neuron to stimulate it" tabindex="-1"></canvas>
+<canvas id="hud" aria-hidden="true"></canvas>
+<div id="warn" role="dialog" aria-modal="true" aria-labelledby="warn-h" aria-describedby="warn-p">
+  <div class="box">
+    <h1 id="warn-h">PHOTOSENSITIVITY WARNING</h1>
+    <p id="warn-p">This visualiser plays along with the music: some moves flash, strobe, invert the colours and shake the
+      picture, fast and without notice, often across the whole screen. It may trigger seizures in people with
+      photosensitive epilepsy.</p>
+    <p>Safe mode keeps every change of light and colour slow (well under 3 per second) and turns off inverts and shakes.
+      You can switch it any time with the panel button or the S key.</p>
+    <p id="warn-rm" class="dim" hidden>Your system asks for reduced motion, so safe mode is the default.</p>
+    <div class="btns"><button id="warn-safe">Use safe mode</button><button id="warn-flash">Continue with flashing effects</button></div>
+  </div>
+</div>
 <aside id="side">
-  <div class="top"><span class="brand">FLY BRAIN DJ</span><span id="stat" class="dim">connecting…</span></div>
+  <div class="top"><span class="brand">FLY BRAIN DJ</span><span id="stat" class="dim">connecting…</span>
+    <button id="safe" aria-pressed="false" title="Safe mode: no fast flashes, inverts or shakes (S)">safe mode: off</button></div>
   <div class="decks" id="decks"></div>
   <div class="card" id="card">
     <div class="lbl" id="mv-lbl">the fly is doing</div>
@@ -87,7 +115,7 @@ ol#hist { list-style: none; margin: 10px 0 0; padding: 0; }
   <div class="next" id="next"></div>
   <ol id="hist"></ol>
   <div class="tick" id="tick"></div>
-  <div class="keys dim">drag to turn · scroll to zoom · click a neuron to stimulate it<br>H hide panel · F full screen · double-click to reset</div>
+  <div class="keys dim">drag to turn · scroll to zoom · click a neuron to stimulate it<br>H hide panel · F full screen · S safe mode · double-click to reset</div>
 </aside>
 <div id="msg"></div>
 <div id="tip"></div>

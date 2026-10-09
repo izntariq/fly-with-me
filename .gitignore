@@ -3,6 +3,6 @@ vendor/
 __pycache__/
 .DS_Store
 tools/node_modules/
-tools/package-lock.json
 .venv/
+.venv-allin1/
 .claude/

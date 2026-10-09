@@ -4,7 +4,7 @@
 // Variations re-roll the arrangement's random choices (seed), shift the tempo (±6 BPM) and the key (−3..+3).
 // Output: data/tracks/<slug>.wav (stereo 16-bit 44.1 kHz) and data/tracks/<slug>.json (bpm, firstBeat, sections)
 
-import { chromium } from 'playwright-core';
+import { launchChrome } from './chrome.mjs';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -25,7 +25,7 @@ const server = http.createServer((req, res) => {
 }).listen(0);
 const port = server.address().port;
 
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+const browser = await launchChrome({ headless: true });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('PAGEERROR', e.message));
 await page.goto(`http://127.0.0.1:${port}/`);

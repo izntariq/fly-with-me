@@ -89,7 +89,7 @@ because it depends on time since the drop, not on sound.
 ## Results (session 1, 28 September)
 
 The kept brain is `brains/trained_brain.npz`: the `fit` method, round 2, with BUILD's 962 synapses reset to the
-connectome's original weights. Plain round 2 is kept as `brains/trained_brain_fit_r2.npz`.
+connectome's original weights. Plain round 2 was saved as `brains/trained_brain_fit_r2.npz` (removed before the 2.0 release; it's in the git history).
 
 ### In the spiking brain, on 2 held-out tracks never trained on
 
@@ -168,7 +168,7 @@ tracks:
 | v2 | −0.02 | +0.39 | +0.41 |
 | v1 | **+0.21** | +0.37 | +0.41 |
 
-v1 stays active. v2 is kept as `brains/trained_brain_v2.npz`.
+v1 stays active. v2 was saved as `brains/trained_brain_v2.npz` (removed before the 2.0 release; it's in the git history).
 
 **Live transfer failed.** In the app, 10 min of v1 with section sense read from the on-air side of the brain:
 - "breakdown sensed" was 0/34 correct (main 17, intro 11, build 6)
@@ -217,7 +217,7 @@ Correlation on 6 held-out pairs, each neuron against its own ear's sections:
 | split, round 2 | +0.06 | +0.13 | +0.44 |
 
 With one track per ear, these neurons can't separate breakdowns or intros even when trained that way. The result is
-kept as `brains/trained_brain_split.npz`; v1 stays active.
+saved as `brains/trained_brain_split.npz` (removed before the 2.0 release; it's in the git history); v1 stays active.
 
 **Three flies.** Every test so far said the trained sense works when a fly hears *one* track in both ears and falls
 apart when one fly splits its ears between two decks. So each deck got its own listener fly hearing its deck in both

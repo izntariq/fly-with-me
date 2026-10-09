@@ -317,9 +317,9 @@ export function pickSet(SET, data, held = process.env.HELD) {
 
 // ---------------- the runs ----------------
 async function main() {
-  const { chromium } = await import('./node_modules/playwright-core/index.mjs');
+  const { launchChrome } = await import('./chrome.mjs');
   const root = new URL('..', import.meta.url).pathname, data = process.env.DATA || root + 'data';
-  const port = process.env.PORT || 8765, mode = process.env.MODE || 'new', runs = +(process.env.RUNS || 3), mins = +(process.env.MIN || 8);
+  const port = process.env.PORT || 8766, mode = process.env.MODE || 'new', runs = +(process.env.RUNS || 3), mins = +(process.env.MIN || 8);
   const SET = process.env.SET || 'heldout';
   // NEURONS=1 / 0: the neurons decide more (exits, track picks, move variants) or the designed rules; unset: the app's default
   const neurons = process.env.NEURONS == null ? null : process.env.NEURONS !== '0';
@@ -331,8 +331,7 @@ async function main() {
   const all = [];
   for (let r = 0; r < runs; r++) {
     const seed = 1234 + r * 977;
-    const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+    const browser = await launchChrome({ headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
     const page = await browser.newPage();
     await page.addInitScript(() => { window.requestAnimationFrame = () => 0; window.flyNoStems = true; });
     await page.route('**/__track/*', (route) => route.fulfill({ body: readFileSync(pick[+route.request().url().split('/').pop()].file), contentType: 'audio/mpeg' }));

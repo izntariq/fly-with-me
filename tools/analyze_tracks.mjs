@@ -1,11 +1,11 @@
 // Run the app's own track analysis (beat grid, per-bar energy, hot cues, style) on every track in
 // data/realtracks/tracks.json, headless, so offline training uses exactly the bars the live app will use.
 //   PORT=8766 node tools/analyze_tracks.mjs        -> data/realtracks/analysis.json
-import { chromium } from './node_modules/playwright-core/index.mjs';
+import { launchChrome } from './chrome.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
-const port = process.env.PORT || 8765, root = new URL('..', import.meta.url).pathname;
+const port = process.env.PORT || 8766, root = new URL('..', import.meta.url).pathname;
 const tracks = JSON.parse(readFileSync(root + 'data/realtracks/tracks.json'));
-const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+const browser = await launchChrome({ headless: true });
 const page = await browser.newPage();
 await page.route('**/__track/*', (route) => {
   const t = tracks[+route.request().url().split('/').pop()];

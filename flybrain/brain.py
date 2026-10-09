@@ -60,14 +60,27 @@ def connectome_name() -> str:
     return os.environ.get("FLYBRAIN_CONNECTOME", "flywire")
 
 
+def _source_stamp() -> np.ndarray:
+    """Size and modification time (ns) of the CSR cache's source files, to tell when the cache is stale."""
+    return np.array([v for p in (PATH_COMP, PATH_CON) for v in (p.stat().st_size, p.stat().st_mtime_ns)], np.int64)
+
+
 def load_connectome():
     """Return (neuron ids, indptr, indices, signed weights in synapses) as CSR by presynaptic index."""
     if connectome_name() == "malecns":
         from .malecns import load_connectome as load_malecns
         return load_malecns()
+    have_src = PATH_COMP.exists() and PATH_CON.exists()
     if CACHE.exists():
         z = np.load(CACHE)
-        return z["ids"], z["indptr"], z["indices"], z["weights"]
+        # the cache remembers the size and mtime of the files it was built from, and is rebuilt when they change.
+        # Without the source files (vendor/ deleted) it's used as it is; one from before the stamp is rebuilt once.
+        if not have_src or ("src" in z.files and np.array_equal(z["src"], _source_stamp())):
+            return z["ids"], z["indptr"], z["indices"], z["weights"]
+    if not have_src:
+        missing = PATH_COMP if not PATH_COMP.exists() else PATH_CON
+        raise SystemExit(f"missing {missing.relative_to(ROOT)} (the Shiu et al. FlyWire model): "
+                         "run ./run.sh once to download it")
     comp = pd.read_csv(PATH_COMP, index_col=0)
     con = pd.read_parquet(
         PATH_CON, columns=["Presynaptic_Index", "Postsynaptic_Index", "Excitatory x Connectivity"]
@@ -85,9 +98,9 @@ def load_connectome():
     CACHE.parent.mkdir(exist_ok=True)
     # written whole, then renamed: an interrupted write can't leave a truncated cache that is loaded ever after
     # (through a file object, so np.savez doesn't append .npz to the name)
-    tmp = CACHE.with_name(CACHE.name + ".part")
+    tmp = CACHE.with_name(f"{CACHE.name}.{os.getpid()}.part")     # per process: two builds can't share a half-file
     with open(tmp, "wb") as f:
-        np.savez(f, ids=ids, indptr=indptr, indices=indices, weights=weights)
+        np.savez(f, ids=ids, indptr=indptr, indices=indices, weights=weights, src=_source_stamp())
     os.replace(tmp, CACHE)
     return ids, indptr, indices, weights
 

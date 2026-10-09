@@ -1,32 +1,84 @@
-# Fly Brain DJ
+# Fly With Me
 
-A real fruit-fly brain makes music and DJs.
+**The whole fruit-fly connectome, simulated in real time, performs a DJ set.**
+
+![Fly With Me: two decks, the whole fly brain spiking, the neurons on the mixer (screenshot from v1.12)](docs/screenshot.png)
 
 The complete adult *Drosophila* connectome (FlyWire v783: **138,639 neurons, 15,091,983 connections**) runs as a
-spiking network in real time. Three copies of it play together: a listener fly on each deck, and a DJ fly that hears
-the two listeners. Music goes into the flies' real auditory neurons. The DJ fly's real descending and motor neurons
-play a synth and work a two-deck DJ mixer.
+spiking network on your computer. Three simulated flies play together: a listener fly on each deck, and a DJ fly that
+hears the two listeners. Music drives the flies' auditory neurons. The DJ fly's descending and motor neurons play a
+synth and work a two-deck mixer: scratches, builds and drops, stems, 29 big-name DJ styles, set planning, key lock.
+
+It's a model, not a living fly, and the DJ craft around the neurons is designed: see
+[what the fly decides and what's designed](#what-the-fly-decides-and-whats-designed).
+
+> ⚠️ **Photosensitivity.** The visualiser flashes in time with the music. It opens behind a warning, and *safe mode*
+> (the default if your system asks for reduced motion) keeps every change of light slow, with no strobes, inverts or
+> shakes. **Volume:** the app starts at −6 dB and fades in; a ceiling at about −1 dBFS is last in the chain.
+
+## Quick start
 
 ```bash
-./run.sh            # starts the brain server and opens http://localhost:8765
+git clone https://github.com/izntariq/fly-with-me.git && cd fly-with-me
+uv venv --python 3.12 .venv && uv pip install -r requirements.lock.txt
+#   (without uv: python3.12 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt)
+./run.sh            # first run downloads the FlyWire data (~210 MB), starts the brain, opens http://localhost:8765
 ```
 
-Press **Start the fly**. A crate of 8 synthesized demo tracks (4 desi, 4 club techno) is ready right away. Drop
-your own audio files anywhere on the page to add them to the crate. Tempo, key, style and an energy curve are
-measured in the browser; the beat grid and song structure come from the song analysis service when it knows the track
-(see [Where the fly is in a track](#where-the-fly-is-in-a-track)).
+Press **Start the fly**. A crate of 8 synthesized demo tracks (4 desi, 4 club techno) is ready right away. Drop your
+own audio files anywhere on the page to add them to the crate. Tempo, key, style and an energy curve are measured in
+the browser; the beat grid and song structure come from the optional song analysis when it's installed
+(`scripts/setup_allin1.sh`, Apple silicon; see [Where the fly is in a track](#where-the-fly-is-in-a-track)).
+
+`run.sh` takes `PORT=…`, `NO_BROWSER=1` and any server flag (`--flies 1`, `--cpu`, `--brain naive`,
+`--connectome malecns`). The first start also builds a 123 MB connectome cache (about 10 s).
+
+### Requirements
+
+- **Python 3.12+** (3.12.7 tested). `requirements.txt` gives compatible ranges, `requirements.lock.txt` the exact
+  tested set.
+- git, curl, and a modern browser: Safari, Chrome, Edge or Firefox. The app is used in Safari and tested in headless
+  Chrome.
+- **Disk:** about 1.2 GB (the environment ~670 MB, the FlyWire model ~370 MB, annotations 32 MB, the cache 123 MB).
+  Optional song analysis: about 1.6 GB more. Optional male CNS: 1.1 GB download plus a 207 MB cache.
+- Node 18+ and Chrome only for the developer tools in `tools/`.
+
+| Platform | Brain runs on | Status |
+|---|---|---|
+| macOS 14+, Apple silicon | GPU (MLX Metal kernels) | Tested (M3 Pro): three flies use about a third of each 20 ms frame |
+| Linux, Intel Mac | CPU (Numba), automatic when MLX is missing | Not re-measured since Audit 4's refractory fix. Three flies need a process each; on 4–8 cores use `./run.sh --flies 1` |
+| Windows | — | Untested; use WSL2 and open the printed address in your Windows browser |
+
+The song analysis (`.venv-allin1`) needs Apple silicon, since its stem separation runs through MLX. Elsewhere, dropped
+tracks keep the browser's beat grid and the listener flies' section sense.
+
+## What the fly decides, and what's designed
+
+| From the simulated connectome | Designed (code in this repo) | From elsewhere |
+|---|---|---|
+| Which neurons fire, when and how hard, for a given sound, taste or wind input | Which neuron groups trigger which DJ move (the giant fiber could as well have been the echo) | Beat grid and song structure of analysed tracks: the All-In-One analyzer |
+| The pathways: ear → giant fiber, ear laterality, bitter → aversion neurons, sugar → motor neurons | Burst detection, cooldowns, the pace target, epicness | The 29 DJ styles: interpretations of published interviews and sets ([DJ_RESEARCH.md](docs/DJ_RESEARCH.md)) |
+| When moves happen (bursts), which variant plays (the cell type leading the burst), which transition style (the most excited group), which deck it turns toward and at which section boundary it leaves a track (steering) | Ear habituation, which makes the fly want the other deck: computed in the browser, the simulation has no adaptation | |
+| The next track: how strongly and in what pattern each candidate excites its listener fly, against the track on air, with the DJ fly's arousal deciding between similar and different | The DJ craft: phrase alignment, planned exits, bass swaps, builds, harmonic mixing, tempo journeys | |
+| 9,978 synapses changed by training (0.07% of connections) | The thresholds that turn these signals into decisions, and the rule that an aroused fly picks the similar track. *Neurons decide more* off: designed rules for exits, picks and variants | |
+| | The section model: a classifier fitted on the listener flies' neurons | |
+
+Measured honestly: the training doesn't measurably help the fly sense song sections, and a classifier on its neurons
+does no better than one on its own ear input ([TRAINING.md](docs/TRAINING.md), [AUDIT.md](docs/AUDIT.md)). Treat the
+fly as the performer and the source of taste, not as a structure detector. [NOTES.md §5](docs/NOTES.md) has the full
+split.
 
 ## Documentation
 
-| Doc | What's in it |
-|---|---|
-| [`docs/NOTES.md`](docs/NOTES.md) | Comprehensive project notes: how every part works, the neuroscience, measured findings, design decisions, limitations, testing, ideas |
-| [`docs/TRAINING.md`](docs/TRAINING.md) | How some of the fly's synapses were trained, the section sense built on its neurons, and what the measurements say about both |
-| [`docs/AUDIT.md`](docs/AUDIT.md) | Four audits of the project (2–4 October): findings, fixes in order, corrections to earlier claims, and the review of Audit 4's fixes |
-| [`docs/HANDOFF.md`](docs/HANDOFF.md) | The current state on one page: how to run it, what's running, open threads, how to test without disturbing a live session |
-| [`docs/DJ_RESEARCH.md`](docs/DJ_RESEARCH.md) | How 29 big-name DJs play live (Guetta, Fred again.., Garrix, Carl Cox, Hawtin, Fisher, Qbert…), what each finding became in the app, and all sources |
-| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every version from the first line of code, and what changed |
-| [`docs/GIT.md`](docs/GIT.md) | Git explainer: how this history is organised and how to browse, compare, run and restore any version |
+| For | Doc | What's in it |
+|---|---|---|
+| Everyone | [`docs/NOTES.md`](docs/NOTES.md) | How every part works, the neuroscience, measured findings, design decisions, limitations, testing, ideas |
+| Everyone | [`docs/DJ_RESEARCH.md`](docs/DJ_RESEARCH.md) | How 29 big-name DJs play live, what each finding became in the app, and all sources |
+| Contributors | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, checks, the data policy, how to send changes |
+| Contributors | [`docs/TRAINING.md`](docs/TRAINING.md) | How some of the fly's synapses were trained, the section sense built on its neurons, and what the measurements say |
+| History | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every version from the first line of code |
+| History | [`docs/AUDIT.md`](docs/AUDIT.md) | Five audits: findings, fixes and corrections to earlier claims. Read its summary first: early sections were later revised |
+| History | [`docs/GIT.md`](docs/GIT.md) | How this history is organised, and how to browse, compare and run any version |
 
 ## What's actually happening
 
@@ -99,7 +151,8 @@ measured in the browser; the beat grid and song structure come from the song ana
 
 **Analysed tracks.** The server looks up a track's beat grid and song structure by the audio file's SHA-1
 (`GET /analysis/<sha1>`).
-- A library of tracks is analysed offline by the All-In-One structure analyzer (Kim & Nam 2023, trained on the
+- The author's library of tracks was analysed offline (those analyses aren't distributed, so the benchmark figures
+  in the docs can't be reproduced from a clone) by the All-In-One structure analyzer (Kim & Nam 2023, trained on the
   human-annotated Harmonix Set), with its Demucs stem separator running on the GPU through MLX (~28 s a track).
 - An unknown dropped file is uploaded and analysed in the background, one at a time, if the analyzer's environment
   (`.venv-allin1`) is installed.
@@ -166,7 +219,7 @@ pop → heavy → pop, Kaytranada's beat tape, or a closing set. Then press **St
 arc, it picks tracks whose intensity matches where the arc is heading, the tempo leans with it, and it builds into
 the peaks and breaks down in the dips. A graph shows the plan, where you are, and how hard the fly actually played.
 
-**The fly on the mic.** With **🎤 fly MC** on, it shouts hype through the browser's speech voice: "Are you ready?"
+**The fly on the mic.** With **🎤 fly MC** on (it's off by default), it shouts hype through the browser's speech voice: "Are you ready?"
 in builds, a shout on the drop, "Balle balle!" on desi tracks, and each DJ style's own lines. Its spikes pick the
 phrase. Styles whose DJs don't talk on the mic stay quiet. The MC is heard live but not captured by *Record set*.
 
@@ -235,7 +288,10 @@ the variant, never the same one twice in a row. With the default style, now and 
 | **ears hear room mix** | With `--flies 1`: the fly hears the master output instead of split cue, including its own synth (a feedback loop). With two or three flies the listeners always hear their own deck's raw track, and the toggle is disabled. |
 | 🍬 Sugar / 🍋 Bitter | 3 s of taste stimulation. Sugar fires feeding motor neurons, so the fly "sings" louder. Bitter fires aversion neurons: the fly dips a low-pass filter and, once past its minimum time on air, wants off the track, which it leaves at the next fitting place with a spinback. |
 | Wind | Drives the JO-C/E wind & gravity neurons. |
-| Fly voice | Level, quantize-to-beat (off = raw spike timing), scale, **MIDI out** (lead on ch 1, bass on ch 2) to drive any hardware or DAW synth. |
+| Fly voice | Level, quantize-to-beat (off = raw spike timing), scale, **MIDI out** (lead on ch 1, bass on ch 2) to drive any hardware or DAW synth. The browser asks for MIDI access only when you open the MIDI-out menu. |
+| volume | Your listening level (default −6 dB, remembered). Recordings are taken before it, at full mix level. |
+| keyboard shortcuts | Single-key shortcuts on or off (remembered). They never fire while a button, field or menu has focus. |
+| 🎤 fly MC | The fly shouts hype through the browser's speech voice. Off by default. |
 | Record set | Records the master output to a `.webm` download. |
 
 The whole brain view shows the performing fly as a frontal projection of every neuron: blue = sensory inputs,
@@ -264,6 +320,8 @@ was added, commit f248899). See `flybrain/malecns.py`.
 
 ## Visualiser
 
+![The visualiser: two listener flies stream into the DJ fly while it plays a laser move](docs/visualiser.png)
+
 **🧠 Visualiser** (top right of the app) opens `viz.html` in its own window, so you can put it on a second screen. It
 shows each fly's whole brain in 3D, at the real FlyWire position of every neuron and coloured by class. Every spike lights
 up as it happens (up to 2,400 a frame across the flies; above that, a random sample).
@@ -278,7 +336,8 @@ A small panel on the side shows:
 - the recent moves and the decks
 
 The background flashes each move's colour, and each move has its own look, timed to the beat. Transitions and drops
-send a shockwave through the brain. Drag turns the brains, the wheel zooms, hovering an output neuron names it, and
+send a shockwave through the brain. It opens behind a photosensitivity warning; **safe mode** (the panel button or
+**S**) smooths every change of light and colour to well under 3 per second and drops inverts, shakes and strobes. Drag turns the brains, the wheel zooms, hovering an output neuron names it, and
 clicking it stimulates that cell type in that fly for 0.9 s. Keys: **H** hides the panel, **F** goes full screen.
 
 Brain activity comes straight from the brain server. The moves, decks and beat come from the DJ app over a
@@ -316,21 +375,93 @@ web/js/tracks.js      club demo tracks, BPM/beat detection, hot cues; the analys
 web/js/desi.js        desi demo tracks: dhol, tabla, dholak, tumbi, sitar, tanpura, harmonium
 web/js/analysis.js    key / Camelot, style and energy analysis of new music
 web/js/viz.js         brain map, raster, ears, waveforms
-brains/               trained synapses (trained_brain.npz and alternatives), section readout, section model, training logs
+brains/               trained synapses, section readout, section model, training logs (CC BY-NC 4.0, see brains/README.md)
+tests/                Python unit tests (unittest) and the section-sense golden fixture
+scripts/setup_allin1.sh  sets up the optional song-analysis environment (.venv-allin1)
+requirements*.txt     the app's dependencies (ranges, and the tested lock); the song analysis's
+LICENSE, NOTICE, CITATION.cff, CONTRIBUTING.md, SECURITY.md   licence, attributions, citation, contributing, security
 experiments/readout.py how brains/readout.json was built
 tools/                benchmarks and tests (djbench, livetest, test_decks, gpucheck…), recording, section training,
                       song analysis (All-In-One, Demucs on MLX)
-docs/                 notes, training, audits, handoff, research, changelog, git explainer
+docs/                 notes, training, audits, research, changelog, git explainer
 vendor/               Shiu et al. model + FlyWire v783 connectivity (cloned by run.sh)
 data/                 annotations, caches, real tracks and their analyses (downloaded / generated, not in git)
 ```
 
-Requirements: Python 3.10+ with `numpy pandas pyarrow numba aiohttp`, plus `mlx` on Apple silicon for the GPU (see
-`requirements.txt`; `run.sh` uses `.venv` when it exists). Without MLX the flies run on the CPU. The song analysis
-needs its own environment (`.venv-allin1`, with all-in-one-infer and demucs-mlx); without it, dropped tracks keep the
-browser's grid and the listener flies' section sense. The browser tools in `tools/` need Node and `playwright-core`
-(`tools/package.json`). The app is used in Safari and tested in headless Chrome. The first start takes about 10 s
-longer, to build the connectome cache.
+## Tests
 
-Data: FlyWire connectome (Dorkenwald et al. 2024, Schlegel et al. 2024, *Nature*). Model: Shiu et al. 2024, *Nature*.
-Song structure: All-In-One (Kim & Nam 2023).
+Everything here runs without the connectome download and takes seconds.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v   # LIF core, CPU/GPU parity, section sense, mapping, the server's guards
+cd tools && npm ci && npm test               # DJ decisions, section-sense parity between Python and the browser
+```
+
+- `tests/test_lif.py` runs the Numba model on hand-built networks: exact integration against the closed-form PSP,
+  spike / reset / refractory, synaptic delay, Poisson drive, event vs dense kernel.
+- `tests/test_gpu_parity.py` (Apple silicon with MLX; skipped elsewhere) checks the Metal kernels give the CPU's spikes
+  exactly under deterministic drive and the same statistics under Poisson drive. GPU runs aren't bit-reproducible
+  (float atomics in the synapse scatter), so never write exact-count tests against them.
+- `tools/test_sections_parity.mjs` checks the browser's section sense gives the Python posteriors on a golden fixture
+  (`tests/fixtures/sections_golden.json`; regenerate with `python tests/fixtures/make_sections_golden.py` only when the
+  model is meant to change).
+- `tools/test_dj_logic.mjs` runs the app's own Mixer, Performer and FlyDJ on a stand-in for Web Audio.
+
+GitHub Actions runs the Node tests and syntax checks, the Python tests on Linux, and again on macOS for the GPU path.
+Heavier checks (the full app headless, benchmarks) are in `tools/` and [NOTES.md §13](docs/NOTES.md); they need a
+server on a spare port: `.venv/bin/python -m flybrain.server --port 8766`, and the tools default to `PORT=8766`.
+
+## Security and LAN mode
+
+By default the server listens on 127.0.0.1 only. Every request must name this machine in its Host header (and in
+Origin when a page sends one), so other websites can't reach it, including through DNS rebinding.
+
+**LAN mode** (play from a phone or tablet): `python -m flybrain.server --host 0.0.0.0`. The server makes a random
+access token and prints the address to open, e.g. `http://192.168.1.5:8765/?t=Xy3…`. Open that link once on each
+device; it sets a cookie, so later loads, uploads and the visualiser window work without it. `FLYBRAIN_TOKEN=…` keeps
+the same token across restarts. On the machine running the server, `http://localhost:8765` needs no token.
+
+**LAN traffic is plain HTTP.** Anyone who can watch your network can read the token and the audio you upload, and
+anyone with the link can drive the flies, poke neurons and upload files. Use LAN mode only on a network you trust.
+Requests from this machine itself need no token, so a tunnel or reverse proxy on it (ssh -R, cloudflared,
+`tailscale serve`) would let its remote users in without one: don't put one in front of the server.
+
+**Your files:** a track you drop in is played in the browser. If the song analysis is installed and the server doesn't
+know the track, the file is copied to `data/uploads/` on the server, analysed, and deleted. Nothing leaves your
+machine (or your LAN, in LAN mode); the app loads no CDNs, fonts or analytics.
+
+**Limits:** 16 pages connected at once; an analysis queue of 20 tracks and 4 GB (when it's full the page keeps its own
+beat grid); 400 MB per upload, saved only under audio extensions. Report vulnerabilities as described in
+[SECURITY.md](SECURITY.md).
+
+## Troubleshooting
+
+- *"missing vendor/Drosophila_brain_model/… / data/neuron_annotations.tsv: run ./run.sh"*: the data wasn't
+  downloaded. Run `./run.sh`; it resumes cleanly after an interrupted download.
+- *"missing the server's packages"* or an old Python: create `.venv` as in [Quick start](#quick-start). `run.sh`
+  prefers `.venv/bin/python` over `python3`.
+- *"the annotations download has SHA-256 …"*: the pinned file changed upstream or the download was corrupted. Nothing
+  was saved; try again, and open an issue if it persists.
+- *No browser opened*: open the printed address yourself (Linux needs `xdg-open`).
+- *No sound*: the browser needs a click first (press **Start the fly**); if audio was suspended, a *tap to resume*
+  button appears. Check the *volume* slider.
+- *Slow or choppy on the CPU*: `./run.sh --flies 1`, and close other heavy tabs. The header shows the brain's load.
+- *The visualiser is blank*: answer its photosensitivity warning; it needs WebGL2.
+- *Dropped tracks get no analysed grid*: the song analysis is optional (`scripts/setup_allin1.sh`, Apple silicon).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: run the tests above, never commit FlyWire data, audio or analyses of
+real tracks, and test on a spare port (8766), never against a server someone is using.
+
+## Licence and citations
+
+The code is Apache-2.0 ([LICENSE](LICENSE)). The trained brain files in `brains/` are derived from FlyWire and are
+**CC BY-NC 4.0**, not Apache-2.0: non-commercial use, with attribution to FlyWire ([brains/README.md](brains/README.md),
+[NOTICE](NOTICE)). The FlyWire connectome and annotations that `run.sh` downloads are also CC BY-NC 4.0; the optional
+male CNS connectome is CC BY 4.0. The optional song analysis is installed by you and not redistributed; madmom's model
+files in it are CC BY-NC-SA 4.0. To cite this project, see [CITATION.cff](CITATION.cff).
+
+Data: FlyWire connectome (Dorkenwald et al. 2024, Schlegel et al. 2024, *Nature*; annotation release ≥3.0 also
+Matsliah et al. 2024 and Berg et al. 2025). Male CNS: male-cns v1.0, Janelia FlyEM (https://male-cns.janelia.org).
+Model: Shiu et al. 2024, *Nature*. Song structure: All-In-One (Kim & Nam 2023, IEEE WASPAA).

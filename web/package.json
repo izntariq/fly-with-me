@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "The browser app is ES modules: this makes Node (node --check, the tests) parse web/js as modules too"
+}

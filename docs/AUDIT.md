@@ -1,4 +1,27 @@
-# Audit: how good is the trained fly as a DJ, and how to make it better
+# Audits
+
+Five audits of the project, oldest first. **Early sections were revised by later ones; read this summary first.**
+
+## Where things stand (9 October)
+
+- **What the fly does.** The simulated connectome is the performer: its bursts time the moves, its most excited group
+  picks the transition style, its steering picks the deck, and its listener flies' responses pick the next track.
+  Song structure on analysed tracks comes from the All-In-One analyzer, and the DJ craft around the neurons is designed.
+- **What the training did.** It made 25 descending neurons fire more in their target sections, but a section model on
+  the trained brain does no better than one on the untrained brain (+0.002 ± 0.012 macro-F1) or on the fly's own ear
+  input (+0.013 ± 0.028) over 131 real tracks. Audit 1's verdict below ("the trained neurons learned something real")
+  was about the neurons' levels; Audits 3 and 4 found it doesn't carry into better section sensing.
+- **Measurements.** Intervals before commit d0095fc used 1.96 instead of Student t (too narrow); section scores on
+  analysed tracks partly grade the planner against its own labels. Use `tools/djscore.mjs`, split by driver.
+- **The engine** (Audit 4): the GPU kernels match the CPU path, the deck timeline is consistent, the three audible bugs
+  are fixed. Planned exits landing in an outro went from 1 of 4 to 9 of 10.
+- **As an open-source product** (Audit 5): the release blockers (licence files, the visualiser's strobing, the brain
+  files' licence, private material) and the high findings (audio safety, the README, reproducible installs, CI and
+  tests) are fixed; see "Audit 5: fix status" at the end.
+
+---
+
+## Audit 1: how good is the trained fly as a DJ, and how to make it better
 
 *2 October 2026, branch `fork/steady-mix`.* This covers the whole chain: the training music, the training method,
 the offline scores, how the app turns trained signals into decisions, the three-fly setup, and live results.
@@ -939,3 +962,37 @@ The public repo (izntariq/fly-with-me) is at v1.12 from 29 September, on a separ
    `test_dj_logic` plus the first pytest tests; tools default to port 8766.
 3. **Robustness pass:** the medium server items (upload cap, extension allowlist, worker respawn, websocket parsing,
    LAN token), then the start-up, keyboard and accessibility items.
+
+## Audit 5: fix status (9 October)
+
+Five work packages made in separate worktrees (licence, visual and audio safety, install, tests and CI, server),
+merged on `release-fixes`, then reviewed again by three read-only reviewers before the docs were written.
+
+| Finding | Status |
+|---|---|
+| B1 licence files | Fixed: LICENSE, NOTICE, CITATION.cff, CONTRIBUTING.md; plus SECURITY.md, CODE_OF_CONDUCT.md, templates |
+| B2 visualiser strobes | Fixed: warning before the first frame, safe mode (prefers-reduced-motion default, S key) |
+| B3 brains/ licence | Fixed: declared CC BY-NC 4.0 in NOTICE and brains/README.md; unused snapshots removed |
+| B4 private material | History and author: done when porting onto the public history (prompts stripped, noreply author). HANDOFF.md and .claude/settings.json stay local and are left out of the port |
+| H1 audio safety | Fixed: volume (−6 dB default), fade-in, ceiling + soft clip, MC off by default |
+| H2 README | Fixed: front page rewritten; the biology / design split is in it. The screenshot is still v1.12's: a new one, or a GIF, needs the app running |
+| H3 install | Fixed: ranges + lock, allin1 recipe, pinned and checked downloads |
+| H4 CI and tests | Fixed: unittest suite (31), parity test, GitHub Actions |
+| Medium: uploads, LAN, worker, start-up, keyboard, platforms, citations, releases, AUDIT summary | Fixed (the release itself is tagged 2.0.0 when published) |
+| Low items | Fixed: websocket parsing, fresh-clone traceback, missing-data errors, tool ports. Left: long-session growth of `S.history`, mobile layout, large functions, the male-CNS download checksum |
+
+**The second review** found one critical bug the fixes had introduced: a comment placed mid-line made
+`visualiser.js` a syntax error, so the visualiser never loaded. `node --check` had passed it because Node didn't parse
+`web/js` as modules; `web/package.json` now says they are. It also found a respawned CPU worker reporting spike times
+on its own clock (all of a frame's notes at once), no timeout on a hung worker, concurrent uploads each seeing the
+whole 4 GB, a retried start leaving a dead resume button and doubled menus, `run.sh --port` opening the live app's
+port, and Python-version messages that disagreed. All fixed.
+
+**Checked in headless Chrome** (a test server on 8766, 9 October, with the neuron work merged): `test_decks` 7/7;
+`vizfx` with flashing allowed and in safe mode, every effect, no page errors; a 2-minute run of the whole app (start,
+two tracks, a phrase-aligned blend), no page errors. The server logged one harmless traceback from aiohttp's compressed
+websocket writer when a test page closed mid-frame (unchanged code; turning off per-message compression would silence
+it). **Not verified:** nothing here has been heard, or run in Safari. Before publishing, open the app (on a spare port)
+in Safari and Chrome and check: the visualiser's warning and safe mode, the volume and fade-in, a start, a dropped
+track, the MIDI menu, and LAN mode from a phone.
+

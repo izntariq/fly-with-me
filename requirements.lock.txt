@@ -1,0 +1,24 @@
+# The exact set the brain server was tested with: CPython 3.12.7 on macOS 26, Apple silicon (MLX needs macOS 14+).
+# Install with:  uv venv --python 3.12 .venv && uv pip install -r requirements.lock.txt
+# (or: python3.12 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt)
+# Elsewhere (Linux, Intel Mac) the mlx lines are skipped and the flies run on the CPU.
+# Loose ranges for packagers: requirements.txt.
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+idna==3.20
+llvmlite==0.49.0
+mlx==0.32.3; platform_system == "Darwin" and platform_machine == "arm64"
+mlx-metal==0.32.3; platform_system == "Darwin" and platform_machine == "arm64"
+multidict==6.9.1
+numba==0.67.0
+numpy==2.5.3
+pandas==3.0.6
+propcache==0.5.4
+pyarrow==25.0.1
+python-dateutil==2.9.0.post0
+six==1.17.0
+typing-extensions==4.16.0
+yarl==1.25.1

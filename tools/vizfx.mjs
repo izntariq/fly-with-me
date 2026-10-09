@@ -1,11 +1,11 @@
 // Visualiser test: the DJ app (no drawing) + viz.html in one headless browser (real GPU via ANGLE Metal). Fires moves from
 // the app's pads, screenshots each effect, then hovers a DJ-fly neuron (tooltip) and clicks it (poke).
 //   PORT=8766 OUT=/tmp/flyviz node tools/vizfx.mjs          (screenshots go to OUT; check the server log for "poke:")
-import { chromium } from './node_modules/playwright-core/index.mjs';
+import { launchChrome } from './chrome.mjs';
 import { mkdirSync } from 'node:fs';
-const SP = process.env.OUT || '/tmp/flyviz', port = process.env.PORT || 8765;
+const SP = process.env.OUT || '/tmp/flyviz', port = process.env.PORT || 8766;
 mkdirSync(SP, { recursive: true });
-const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
+const browser = await launchChrome({ headless: true,
   args: ['--autoplay-policy=no-user-gesture-required', '--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 } });
 const app = await ctx.newPage();
@@ -21,6 +21,8 @@ const viz = await ctx.newPage();
 viz.on('pageerror', (e) => errs.push('VIZ ' + e.message));
 viz.on('console', (m) => { if (m.type() === 'error') errs.push('VIZ console ' + m.text()); });
 await viz.goto(`http://localhost:${port}/viz.html`);
+// the photosensitivity warning holds the first frame; this tool records the full effects (SAFE=1: safe mode)
+await viz.click(process.env.SAFE === '1' ? '#warn-safe' : '#warn-flash');
 await viz.waitForTimeout(22000);
 const shots = [['fx:echo', 900], ['scratch:chirp', 700], ['brake', 900], ['sample:co2', 500], ['sample:laser', 500], ['chop', 1500], ['acid', 2200], ['build:4', 5200], ['build:4', 3300]];
 let i = 0;

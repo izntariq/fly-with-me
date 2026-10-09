@@ -3,9 +3,9 @@
 //   PORT=8766 node tools/livetest.mjs 150
 // Use a spare port (a second server: .venv/bin/python -m flybrain.server --port 8766) so a browser you are using on
 // 8765 isn't disturbed. Drawing is off (headless Chrome's software canvas would starve the brain); set DRAW=1 to keep it.
-import { chromium } from './node_modules/playwright-core/index.mjs';
-const secs = +(process.argv[2] || 240), port = process.env.PORT || 8765;
-const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+import { launchChrome } from './chrome.mjs';
+const secs = +(process.argv[2] || 240), port = process.env.PORT || 8766;
+const browser = await launchChrome({ headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1400, height: 1400 } });
 // headless Chrome has no GPU: skip drawing (software canvas rendering would starve the brain simulation).
 // Audio, the brain and all DJ logic still run; only the visuals are off.

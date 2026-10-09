@@ -1,21 +1,36 @@
 // Two-deck DJ mixer: per-deck EQ, filter, loop roll, echo throw, backspin, scratching, brake, hot cues;
-// equal-power crossfader; master bus runs through the FX rack.
+// equal-power crossfader; master bus runs through the FX rack, a bus compressor, a ceiling and a soft clip, then the
+// listener's volume.
 
 import { FXRack, Sampler, holdAt } from './fx.js';
 
 export class Mixer {
   constructor(ctx) {
     this.ctx = ctx;
+    // master ─► FX rack ─► bus compressor ─► ceiling ─► soft clip = out ─► volume ─► speakers
+    // The bus compressor (−6 dB, 12:1, 3 ms) glues the mix but has automatic makeup gain, so transients and the 1.4×
+    // boosts can still pass 0 dBFS. The ceiling catches those (−3 dB, 20:1, 1 ms; it too adds a little makeup) and the
+    // soft clip after it is the hard limit: unity below 0.7, bending to ±0.87 (≈ −1.2 dBFS) at full scale and flat
+    // beyond, so nothing louder can reach the speakers or a recording.
+    // `out` is the finished mix BEFORE the listener's volume: recordings and the fly's room-mix ears hear the same
+    // level whatever the volume slider says (turning it down must not change what the fly hears). The volume gain
+    // only attenuates (0..1) and carries the start-up fade-in, so it can't undo the ceiling.
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6; limiter.knee.value = 4; limiter.ratio.value = 12;
     limiter.attack.value = 0.003; limiter.release.value = 0.15;
-    this.master.connect(limiter);
-    limiter.connect(ctx.destination);
-    this.out = limiter; // tap for recording / room ears
+    const ceiling = ctx.createDynamicsCompressor();
+    ceiling.threshold.value = -3; ceiling.knee.value = 0; ceiling.ratio.value = 20;
+    ceiling.attack.value = 0.001; ceiling.release.value = 0.1;
+    const clip = ctx.createWaveShaper(), n = 2049, curve = new Float32Array(n), K = 0.7, C = 0.891 - K;
+    for (let i = 0; i < n; i++) { const x = 2 * i / (n - 1) - 1, m = Math.abs(x); curve[i] = Math.sign(x) * (m <= K ? m : K + C * Math.tanh((m - K) / C)); }
+    clip.curve = curve; clip.oversample = '4x';
+    this.volume = ctx.createGain(); this.volume.gain.value = 0;       // silent until fadeIn
+    this.vol = 0.5;
+    limiter.connect(ceiling); ceiling.connect(clip); clip.connect(this.volume); this.volume.connect(ctx.destination);
+    this.out = clip; // tap for recording / room ears (pre-volume)
     // master bus goes through the FX rack before the limiter
-    this.master.disconnect();
     this.fx = new FXRack(ctx, limiter);
     this.master.connect(this.fx.in);
 
@@ -35,6 +50,19 @@ export class Mixer {
     this.lockUntil = 0;   // a scheduled cut owns the crossfader until then
     this.x = 0; // 0 = full A, 1 = full B
     this.setCrossfader(0);
+  }
+  // the listener's volume (0..1, linear gain after the ceiling); fadeIn brings it up from silence over `sec`
+  setVolume(v) {
+    this.vol = Math.max(0, Math.min(1, +v || 0));
+    if (this.fading && this.ctx.currentTime < this.fading) return;      // the fade lands on the new value anyway
+    const g = this.volume.gain, now = this.ctx.currentTime;
+    g.cancelScheduledValues(now); g.setTargetAtTime(this.vol, now, 0.03);
+  }
+  fadeIn(sec = 2) {
+    const g = this.volume.gain, now = this.ctx.currentTime;
+    this.fading = now + sec;
+    g.cancelScheduledValues(now); g.setValueAtTime(0, now); g.linearRampToValueAtTime(this.vol, now + sec);
+    setTimeout(() => { this.fading = 0; this.setVolume(this.vol); }, sec * 1000 + 50);   // a slider move during the fade
   }
   // key lock (CDJ "master tempo"): load the pitch-shifter worklet, then switch every deck to it
   async initKeylock() {

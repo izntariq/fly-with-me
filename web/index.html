@@ -40,7 +40,7 @@
   <section class="decks">
     <div class="deck" id="deck-A">
       <div class="deck-head"><span class="deck-letter">A</span><span class="track-name">—</span><span class="bpm">— BPM</span></div>
-      <canvas class="wave" width="600" height="70"></canvas>
+      <canvas class="wave" width="600" height="70" role="img" aria-label="Deck A waveform and play position"></canvas>
       <div class="deck-row">
         <span class="time">0:00</span>
         <div class="habit" title="fly habituation to this deck (ear gain drops while on air)"><div></div></div>
@@ -52,17 +52,17 @@
       <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 1">Intro<kbd>1</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 2">Build<kbd>2</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 3">Drop<kbd>3</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 4">Break<kbd>4</kbd></button></div>
       <div class="stems"><button class="stem" data-stem="drums" title="mute / unmute the drum stem">DRUMS</button><button class="stem" data-stem="music" title="mute / unmute everything but the drums">MUSIC</button><span class="stem-status dim"></span></div>
       <div class="knobs">
-        <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
-        <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
-        <label>LOW<input type="range" class="eq-low" min="-24" max="6" step="0.5" value="0"></label>
-        <label>FILTER<input type="range" class="filter" min="-1" max="1" step="0.01" value="0"></label>
+        <label>HI<input type="range" class="eq-high" aria-label="Deck A high EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>MID<input type="range" class="eq-mid" aria-label="Deck A mid EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>LOW<input type="range" class="eq-low" aria-label="Deck A low EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>FILTER<input type="range" class="filter" aria-label="Deck A filter" min="-1" max="1" step="0.01" value="0"></label>
       </div>
     </div>
 
     <div class="mixer">
       <div class="ears">
-        <div class="ear"><span>L ear</span><canvas id="ear-L" width="120" height="60"></canvas></div>
-        <div class="ear"><span>R ear</span><canvas id="ear-R" width="120" height="60"></canvas></div>
+        <div class="ear"><span>L ear</span><canvas id="ear-L" width="120" height="60" role="img" aria-label="What the fly's left ear hears, by frequency band"></canvas></div>
+        <div class="ear"><span>R ear</span><canvas id="ear-R" width="120" height="60" role="img" aria-label="What the fly's right ear hears, by frequency band"></canvas></div>
       </div>
       <div class="tempo">
         <button id="bpm-down" title="−1 BPM (key -)">−</button>
@@ -71,13 +71,15 @@
         <button id="bpm-tap" title="tap the beat">TAP</button>
         <button id="bpm-reset" title="back to the on-air track's own tempo">↺</button>
       </div>
-      <input type="range" id="bpm" min="80" max="170" step="0.1" value="124" title="master tempo: both decks follow">
+      <input type="range" id="bpm" min="80" max="170" step="0.1" value="124" title="master tempo: both decks follow" aria-label="Master tempo, BPM">
       <label class="tog" title="CDJ-style master tempo: change BPM without changing pitch"><input type="checkbox" id="keylock" checked> key lock</label>
       <div class="xf-wrap">
-        <span>A</span><input type="range" id="xfader" min="0" max="1" step="0.001" value="0"><span>B</span>
+        <span>A</span><input type="range" id="xfader" min="0" max="1" step="0.001" value="0" aria-label="Crossfader, deck A to deck B"><span>B</span>
       </div>
       <div class="pref"><span>fly preference</span><div id="pref-bar"><div></div></div></div>
       <div class="mix-controls">
+        <label title="your listening level (recordings and the fly's ears don't change with it); the fly fades in over 2 s">volume <b id="volume-val">−6 dB</b><input type="range" id="volume" min="0" max="1" step="0.01" value="0.5"></label>
+        <label class="tog" title="single-key shortcuts for the pads, hot cues and tempo (they never fire while a button, slider or menu has focus)"><input type="checkbox" id="keys" checked> keyboard shortcuts</label>
         <label class="tog"><input type="checkbox" id="auto" checked> fly autopilot</label>
         <label class="tog" title="the fly's neurons choose when to leave a track (at a section boundary), which track comes next (by the pattern of neurons it excites) and which variant of a move plays (the cell type that led the burst). Off: designed rules for those"><input type="checkbox" id="neurons" checked> neurons decide more</label>
         <label class="tog"><input type="checkbox" id="ride" checked> fly rides the tempo</label>
@@ -90,7 +92,7 @@
 
     <div class="deck" id="deck-B">
       <div class="deck-head"><span class="deck-letter">B</span><span class="track-name">—</span><span class="bpm">— BPM</span></div>
-      <canvas class="wave" width="600" height="70"></canvas>
+      <canvas class="wave" width="600" height="70" role="img" aria-label="Deck B waveform and play position"></canvas>
       <div class="deck-row">
         <span class="time">0:00</span>
         <div class="habit" title="fly habituation to this deck (ear gain drops while on air)"><div></div></div>
@@ -102,10 +104,10 @@
       <div class="cues"><button class="cue" data-cue="0" title="hot cue (quantized to the bar) — key 7">Intro<kbd>7</kbd></button><button class="cue" data-cue="1" title="hot cue (quantized to the bar) — key 8">Build<kbd>8</kbd></button><button class="cue" data-cue="2" title="hot cue (quantized to the bar) — key 9">Drop<kbd>9</kbd></button><button class="cue" data-cue="3" title="hot cue (quantized to the bar) — key 0">Break<kbd>0</kbd></button></div>
       <div class="stems"><button class="stem" data-stem="drums" title="mute / unmute the drum stem">DRUMS</button><button class="stem" data-stem="music" title="mute / unmute everything but the drums">MUSIC</button><span class="stem-status dim"></span></div>
       <div class="knobs">
-        <label>HI<input type="range" class="eq-high" min="-24" max="6" step="0.5" value="0"></label>
-        <label>MID<input type="range" class="eq-mid" min="-24" max="6" step="0.5" value="0"></label>
-        <label>LOW<input type="range" class="eq-low" min="-24" max="6" step="0.5" value="0"></label>
-        <label>FILTER<input type="range" class="filter" min="-1" max="1" step="0.01" value="0"></label>
+        <label>HI<input type="range" class="eq-high" aria-label="Deck B high EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>MID<input type="range" class="eq-mid" aria-label="Deck B mid EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>LOW<input type="range" class="eq-low" aria-label="Deck B low EQ" min="-24" max="6" step="0.5" value="0"></label>
+        <label>FILTER<input type="range" class="filter" aria-label="Deck B filter" min="-1" max="1" step="0.01" value="0"></label>
       </div>
     </div>
   </section>
@@ -134,7 +136,7 @@
       <label>Set plan<select id="arc"></select></label>
       <label>Length<select id="set-len"><option value="10">10 min</option><option value="20">20 min</option><option value="30" selected>30 min</option><option value="60">60 min</option><option value="90">90 min</option></select></label>
       <button id="set-start">▶ Start set</button>
-      <canvas id="arc-graph" width="360" height="60" title="the plan (line), where you are (marker), and how hard the fly is playing (dots)"></canvas>
+      <canvas id="arc-graph" width="360" height="60" role="img" aria-label="Set plan: the planned energy, where the set is, and how hard the fly is playing" title="the plan (line), where you are (marker), and how hard the fly is playing (dots)"></canvas>
       <span id="set-status" class="dim"></span>
     </div>
     <p id="persona-tag" class="dim persona-tag"></p>
@@ -204,14 +206,14 @@
   <section class="brain-row">
     <div class="panel brain-panel">
       <h3>Whole brain <span class="dim">(every dot is a neuron; flashes are spikes)</span></h3>
-      <canvas id="brain" width="900" height="420"></canvas>
+      <canvas id="brain" width="900" height="420" role="img" aria-label="The whole fly brain seen from the front: every dot a neuron, flashes are spikes"></canvas>
       <div class="legend"><i class="c-in"></i>sensory input <i class="c-out"></i>descending / motor output <i class="c-mid"></i>everything in between</div>
     </div>
     <div class="panel moves-panel">
       <h3>Neurons on the mixer</h3>
       <div id="moves"></div>
       <h3>Output raster <span class="dim">(1,409 DN+MN, last 4 s)</span></h3>
-      <canvas id="raster" width="420" height="160"></canvas>
+      <canvas id="raster" width="420" height="160" role="img" aria-label="Spike raster of the descending and motor output neurons over the last 4 seconds"></canvas>
     </div>
   </section>
 
@@ -228,7 +230,7 @@
       <div class="feed">
         <label>Level<input type="range" id="voice-level" min="0" max="1" step="0.01" value="0.6"></label>
         <label class="tog"><input type="checkbox" id="quantize" checked> quantize to beat</label>
-        <label class="tog" title="the fly shouts hype on the mic (browser speech; heard live, not in recordings)"><input type="checkbox" id="mc" checked> 🎤 fly MC</label>
+        <label class="tog" title="the fly shouts hype on the mic (browser speech; heard live, not in recordings)"><input type="checkbox" id="mc"> 🎤 fly MC</label>
         <label>Scale<select id="scale">
           <option value="auto">follow track</option>
           <option value="minpent">minor pentatonic</option>
@@ -241,7 +243,7 @@
           <option value="bhairavi">raag bhairavi</option>
           <option value="khamaj">raag khamaj</option>
         </select></label>
-        <label>MIDI out<select id="midi-out"><option value="">off</option></select></label>
+        <label title="send the fly's synth notes to a MIDI port (the browser asks for MIDI access when you first open this)">MIDI out<select id="midi-out"><option value="">off</option></select></label>
       </div>
       <div class="feed">
         <button id="btn-rec">● Record set</button>
@@ -257,11 +259,11 @@
         <option value="all">both</option>
       </select></label></div>
       <ol id="crate"></ol>
-      <input type="file" id="file-in" accept="audio/*" multiple>
+      <input type="file" id="file-in" accept="audio/*" multiple aria-label="Add audio files to the crate">
     </div>
     <div class="panel">
       <h3>What the fly is doing</h3>
-      <ul id="log"></ul>
+      <ul id="log" aria-live="polite" aria-relevant="additions"></ul>
     </div>
   </section>
 </main>

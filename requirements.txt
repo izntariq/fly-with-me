@@ -1,6 +1,9 @@
-numpy
-pandas
-pyarrow
-numba
-aiohttp
-mlx; platform_system == "Darwin" and platform_machine == "arm64"   # GPU (Apple silicon)
+# The brain server (flybrain/). Python 3.12 or newer (numpy 2.5 needs it): tested on CPython 3.12.7, macOS on Apple silicon.
+# Lower bounds are the tested versions; requirements.lock.txt pins the exact tested set:
+#   uv venv --python 3.12 .venv && uv pip install -r requirements.lock.txt
+numpy>=2.5.3,<3
+pandas>=3.0.6,<4
+pyarrow>=25.0.1          # only reads the Shiu et al. parquet; majors come every few months and haven't broken that
+numba>=0.67.0,<1         # the CPU path (and the LIF kernel the GPU path is checked against)
+aiohttp>=3.14.3,<4       # >=3.12.14 at the very least, for its security fixes
+mlx>=0.32.3,<1; platform_system == "Darwin" and platform_machine == "arm64"   # GPU (Apple silicon)

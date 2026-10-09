@@ -47,15 +47,19 @@ Python (flybrain/)                                       Browser (web/)
   - `{type: "poke", fly, idx: [neuron…], hz, ms}`: extra Poisson drive on up to 64 neurons of one fly (the
     visualiser's click), capped at 300 Hz, 3 s and 16 live pokes per fly.
   - `{type: "reset"}`.
+  - A malformed message is dropped (one warning per 10 s), never allowed to close the socket.
 - Server → browser, on every connection: `{type: "hello", trained, flies, connectome, sections, dj_taps,
   dj_tap_types, n_neurons, n_connections, frame_ms, inputs, outputs, in_idx, out_idx}`. `trained` carries the section
   readout; `sections` is the section model for the listener flies.
+- Server → browser, `{type: "error", message}`: after 5 failed frames in a row (also sent to pages that connect
+  meanwhile), and `message: null` once frames run again. The page logs it.
 - Server → browser, every frame: `{type: "frame", t, n, out, outs, viz, vizs, load, reset}`. `outs` holds one
   `[[slot, ms]…]` list per fly and `vizs` one sample of neuron indices per fly; `out` and `viz` are fly 1's.
 - **A changed brain.** Both pages fingerprint the hello (flies, connectome, neurons, connections, inputs, outputs,
   learned synapses). A reconnect to the same brain carries on. A different one (a restart with `--flies 2`, the male
   CNS, another trained brain) makes the visualiser reload, and the DJ page stop driving the flies and show a reload
   banner (before the start it just reloads).
+- **At most 16 clients**; the next is closed with 1013 "too many clients". The hello is encoded once per brain.
 - **Each client** gets its own 4-frame queue and sender task. A page that stops reading (a paused tab, a debugger)
   loses its oldest frames instead of stalling the brain for everyone.
 - When the page that drives the flies disconnects (or the last client goes), every fly's drive is set to zero, so the
@@ -72,14 +76,26 @@ Python (flybrain/)                                       Browser (web/)
   analysis failed. A run whose analyser was killed by a signal (Ctrl-C on the server reaches it too; macOS kills under
   memory pressure) isn't marked failed, so the track can be tried again.
 - `POST /analysis/<sha1>` uploads an unknown file for background analysis (§10): 202 queued; the GET answer when no
-  upload is needed (known, queued, indexing or failed); 400 if the file doesn't hash to the sha; 413 over 400 MB; 503
-  when no analyser is installed. Uploads are streamed to disk and hashed a few MB at a time in a worker thread, off the
-  event loop.
+  upload is needed (known, queued, indexing or failed); 400 if the file doesn't hash to the sha; 413 over 400 MB; 429
+  `{status: "full", reason}` when 20 tracks are already claimed (uploading, waiting or running) or `data/uploads/`
+  holds 4 GB (the page then logs "analysis queue full, using the browser's grid"); 503 when no analyser is installed.
+  Uploads are streamed to disk and hashed a few MB at a time in a worker thread, off the event loop. `X-Ext` must be an
+  audio extension (`AUDIO_EXTS`), otherwise `.mp3`: the analyser's own `<sha>.json` / `<sha>.failed` share the folder.
+  One analyser thread takes uploads from a bounded queue.
 - **Who may connect.** Every request must name this machine in its Host header: `localhost`, `127.0.0.1`, `::1` or the
   `--host` name. Bound to every interface (`--host 0.0.0.0` or `::`), any IP address is allowed too, so a phone can
   use `http://<the Mac's IP>:8765`; reaching it by a name (`mymac.local`) needs `--host <that name>`. A page's Origin,
   when it sends one, must be this machine by name or the very host the request went to. That stops DNS rebinding,
   and stops a page served from another address opening the websocket (websockets have no CORS).
+- **LAN token.** Bound beyond loopback (`--host 0.0.0.0`, `::`, a LAN IP or a name), the server makes a token
+  (`secrets.token_urlsafe(16)`, or `FLYBRAIN_TOKEN`) and prints `http://<LAN ip>:<port>/?t=<token>`; `token_guard`
+  runs after `host_guard`. A request passes if it comes from a loopback address, or carries the token as `?t=`, as
+  `X-Fly-Token`, or as the cookie `flytoken_<sha1(token)[:8]>` (HttpOnly, SameSite=Lax), which any `?t=` request that
+  isn't a websocket sets. The pages add `location.search` to their `/ws` URL too.
+- **Failure recovery.** A CPU worker's pipe end is closed in the server, so a dead worker raises at once instead of
+  hanging. After a failed frame, live workers' unread replies are drained and dead or stuck ones respawned (a fresh,
+  reset brain). The loop backs off 1, 2, 4 … 30 s.
+- **A fresh clone** has no library: nothing is indexed or written until there is one.
 
 **The DJ page** (`main.js`).
 - The control loop (drive levels, the DJ's decisions, the tempo) runs 40 times a second on a worker's timer: WebKit
@@ -93,10 +109,21 @@ Python (flybrain/)                                       Browser (web/)
 - A load that finishes decoding after its deck came on air, or while a transition is lined up, is dropped rather than
   swapping the track mid-transition.
 - With two or three flies the "ears hear room mix" toggle is disabled: each listener hears its own deck.
+- **Start-up.** A failure while starting shows on the splash, and Start can be pressed again (the half-built audio
+  context is closed). Tracks dropped before Start are queued and added when the fly starts. MIDI access is asked only
+  when the MIDI-out menu is first opened.
+- **Keyboard.** Single-key shortcuts can be switched off (*keyboard shortcuts*, localStorage `flybrain-keys`) and
+  never fire while a button, field or menu has focus; a button clicked with the mouse gives its focus back. The move
+  log is an `aria-live` region; sliders and canvases are labelled.
 - The tempo keys work on the numpad and on other keyboard layouts, and ⇧ gives the fine step. Download links (a
   recording, an exported set) stay valid for 10 minutes, since Safari may ask before saving.
 - The visualiser asks for the move history again once its hello is in, and waits out a lost WebGL context (Safari
   drops them under GPU memory pressure), reloading when it comes back.
+- **Visualiser safe mode.** viz.html opens behind a photosensitivity warning; nothing is drawn until it's answered
+  (localStorage `flybrain-viz-motion`; safe mode is the default under `prefers-reduced-motion`; **S** or the panel
+  button switches). `soften()` in visualiser.js post-processes each frame's look: a 0.3 s low-pass on light, colour and
+  camera, caps on brightness, size and wash, no invert, shake or slices, beat breathing ×0.35, loop replays at 2.5 Hz
+  at most, lasers dimmed. A new effect needs nothing special as long as it acts through the look.
 
 ## 3. The brain model
 
@@ -268,10 +295,16 @@ deck: sources (full mix, or drums + music stems with their own mutes) ─► inp
       └─► low shelf ─► peak ─► high shelf ─► LPF ─► HPF ─► tap ─► xf gain ─► master
                                                             └─► echo send ─► echo bus
       each source also feeds rawTap directly (before stem mutes, the slip mute, EQ and FX): what listener flies hear
-master ─► FX rack in ─► HPF ─► LPF ─┬─► trans gate ─► crush ─► flanger ─► out ─► limiter ─► speakers
+master ─► FX rack in ─► HPF ─► LPF ─┬─► trans gate ─► crush ─► flanger ─► out ─► bus comp ─► ceiling ─► soft clip ─► volume ─► speakers
                                     └─► reverb send ─► convolver ────────────────┘     (reverb sits before the gate, so its tail rings through drop gaps)
-sampler (horn, siren, laser, boom, riser, dhol roll) ─► limiter
+sampler (horn, siren, laser, boom, riser, dhol roll) ─► bus comp
 ```
+
+- **Safety at the end of the chain.** Bus compressor (−6 dB, 12:1, 3 ms), then a ceiling (−3 dB, 20:1, 1 ms, hard
+  knee), then a 4×-oversampled soft clip (unity below 0.7, a tanh bend to about −1.2 dBFS). That is `mixer.out`, the
+  tap for recording and room-mode ears, so neither changes with the listener's level. Then `mixer.volume`: the
+  listener's level (default 0.5, −6 dB, localStorage `flybrain-volume`), silent until `fadeIn(2)` on Start. The MC's
+  speech can't be routed through Web Audio; it plays at 0.6 and is off by default.
 
 - **Slip mode.** Rolls, scratches, brakes and backspins play from separate sources while the main track keeps running
   silently underneath, so the track always comes back in on the grid. Overlapping moves share one slip-mute schedule.
@@ -655,7 +688,10 @@ The instruments:
 
 ## 13. Testing
 
-Automated. The browser tests run the app in headless Chrome through `playwright-core` (`tools/`).
+Automated. `cd tools && npm test` and `python -m unittest discover -s tests` need nothing downloaded and run in CI
+(`.github/workflows/ci.yml`). The browser tests run the app in headless Chrome through `playwright-core` (`tools/`,
+`npm ci`); they find Chrome through `$CHROME`, the installed Chrome, or playwright's own (`tools/chrome.mjs`), and
+default to port 8766.
 
 **Don't test against a server someone is using.** Their pages reconnect on their own, so a test page's drive would
 mix with theirs. Start a second server (`.venv/bin/python -m flybrain.server --port 8766`) and point the tools at it
@@ -665,11 +701,13 @@ with `PORT=8766`.
 |---|---|
 | `tools/djbench.mjs` | Benchmark v3: the whole app on real tracks, repeated seeded runs (`RUNS`, `MIN`). `SET=heldout`, `fresh`, or `random:<n>:<seed>`: n analysed tracks drawn by the seed from those never in `held_out.json`, `test_fresh.json`, the first 80 of `label_queue.txt` or the section model's recordings. It logs raw facts in track time: every move and transition with the on-air track and its position in seconds (as scheduled and as it played) and who drove it; transitions from lined up to fully in; master silences every 100 ms; the on-air track over time; the brain's load every second. The crate is put in name order, then shuffled by the seed (Fisher-Yates), so two app versions get the same crate. Runs go to `data/bench/`, scored by djscore. |
 | `tools/djscore.mjs` | Grades bench files offline against the raw All-In-One beats, downbeats and sections, not either version's grid: section at the landing or move, on a bar / 4-bar / 8-bar line, fit, variety, silences judged against what each move means to be silent, time on air, load (a run mean), the listeners' sense. Split by driver (planned exit, sense, 4-minute cap, track ending; bursts, sense, set plan). Mean ± Student-t 95% CI over runs, pooled Wilson intervals, and a paired A/B (`A.json B.json`). A file from before v3 scores what it can; `FILE@1167539` or `FILE@6901364` places its transitions through that version's grid fit. `--selftest` checks the scorer. |
+| `python -m unittest discover -s tests` | Python, standard library only, seconds, no data: the LIF core on hand-built networks (exact integration, refractory, delay, Poisson drive, event vs dense kernel), CPU/GPU parity (with MLX), the section model, input/output mapping, the Host/Origin guard |
+| `tools/test_sections_parity.mjs` | The browser's section sense against the Python on a golden fixture (`tests/fixtures/sections_golden.json`), to 1e-4 |
 | `tools/test_dj_logic.mjs` | The DJ's decisions in plain Node, with no browser, server or brain: the app's own Mixer, Deck, Performer and FlyDJ on a stand-in for Web Audio that records every AudioParam call. 34 checks: replayed tracks, folds, double drops, moves before the exit, tempo holds, the fader on the audio clock, the neurons' exits, track picks and variants… |
 | `tools/test_decks.mjs` | The app's Deck in an OfflineAudioContext with a ramp track, so the rendered output shows which position played when: single, stacked and earlier jumps, stop while a jump is pending, stems respawn, the next bar after a jump back, duck merging |
 | `tools/livetest.mjs` | A live run: how often each listener sense is on in its section against chance, listener z by section, load |
 | `tools/onairtest.mjs` | How long each track stays fully on air |
-| `tools/vizfx.mjs` | Fires pad moves and screenshots each visualiser effect, then hovers and pokes a neuron |
+| `tools/vizfx.mjs` | Fires pad moves and screenshots each visualiser effect, then hovers and pokes a neuron (`SAFE=1` in safe mode) |
 | `tools/gpucheck.py` | GPU spike statistics (the sugar experiment over 3 seeds, a music-like drive), printed beside fixed CPU reference figures from before the refractory fix, and speed for 1 / 3 / 18 flies |
 | `tools/cnscheck.py` | The same stimuli (silence, the whole sugar channel, music-like ear drive) on either connectome |
 | `tools/compare_sense.py` | Offline, nested: what a section model can be built from (TRAINING.md) |

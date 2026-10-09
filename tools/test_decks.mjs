@@ -3,10 +3,10 @@
 // when, and two sources sounding at once show up as a wrong (summed) value.
 //
 //   PORT=8766 node tools/test_decks.mjs        (needs the app's server running on PORT)
-import { chromium } from './node_modules/playwright-core/index.mjs';
+import { launchChrome } from './chrome.mjs';
 
 const port = process.env.PORT || 8766, base = `http://127.0.0.1:${port}`;
-const browser = await chromium.launch({ channel: 'chrome', headless: true }).catch(() => chromium.launch({ headless: true }));
+const browser = await launchChrome({ headless: true });
 const page = await browser.newPage();
 await page.goto(base + '/js/decks.js');
 

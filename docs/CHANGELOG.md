@@ -1,6 +1,6 @@
 # Changelog
 
-Every version from the first line of code. Times are local (PDT), from 27 September to 5 October 2026. Each entry
+Every version from the first line of code. Times are local (PDT), from 27 September to 9 October 2026. Each entry
 names the commit, so `git show <id>` gives the full notes and diff. Versions with a `vX.Y` tag are the milestones of
 the first night. The work after v1.11 is grouped by theme.
 
@@ -433,3 +433,39 @@ exits landing in an outro went from 1 of 4 to 9 of 10, and nothing measured got 
 - A *neurons decide more* toggle (on by default) brings back the designed rules; `djbench` takes `NEURONS=0/1`, and
   `djscore` counts neuron-chosen exits as their own driver. `test_dj_logic`: 34 checks.
 - Not measured live yet: a same-seed `djbench` comparison with `NEURONS=1` against `NEURONS=0` is the next step.
+
+## 2.0.0 — release readiness (Audit 5) · Oct 8–9
+
+The work since v1.12, made ready to publish: Audit 5 judged the project as an open-source product, and these fix
+what it found. Each fix was reviewed again before release.
+
+- **Licensing:** LICENSE (Apache-2.0), NOTICE, CITATION.cff and CONTRIBUTING.md, ported from v1.12 and updated.
+  `brains/` is declared CC BY-NC 4.0 (FlyWire-derived), with brains/README.md. NOTICE and CITATION.cff add the male
+  CNS connectome (CC BY 4.0) and All-In-One (Kim & Nam 2023); NOTICE covers the optional song-analysis toolchain
+  (madmom's models are CC BY-NC-SA). The three unused brain snapshots are gone. SECURITY.md, CODE_OF_CONDUCT.md and
+  issue / pull request templates.
+- **Visualiser safety:** a photosensitivity warning before the first frame; safe mode (default under
+  prefers-reduced-motion; S key and a panel button) smooths every change of light to well under 3 Hz and drops inverts,
+  shakes and strobes.
+- **Audio safety:** a volume slider (default −6 dB, remembered), a 2 s fade-in on Start, a ceiling and a soft clip at
+  about −1 dBFS last in the chain; the MC is quieter and off by default.
+- **Start-up and keyboard:** a failed start shows why and can be retried; tracks dropped before Start are queued;
+  MIDI permission is asked only when you pick a MIDI port; shortcuts can be switched off and never fire while a
+  control has focus (Space on a button no longer fires BUILD & DROP); labels for screen readers, a live move log.
+- **Install:** `requirements.txt` with tested ranges and `requirements.lock.txt` with the exact set (Python 3.12+);
+  `requirements-allin1.txt` and `scripts/setup_allin1.sh` for the song analysis; `run.sh` pins the Shiu et al. model
+  and the annotations to tested commits, checks the annotations' SHA-256, survives interrupted downloads, opens a
+  browser on Linux too, and honours `--port`; clear messages instead of tracebacks when data is missing; the connectome
+  cache is rebuilt when its source changes. The browser tools default to port 8766 and find Chrome on any platform.
+- **Server:** an analysis queue capped at 20 tracks and 4 GB (429 when full), uploads saved only under audio
+  extensions; a dead or hung CPU worker is replaced and the pages are told when frames keep failing; malformed
+  messages are dropped instead of closing the socket; at most 16 clients; LAN mode needs a start-up token.
+- **Tests and CI:** a standard-library `unittest` suite (the LIF core on hand-built networks, CPU/GPU parity, the
+  section model, mapping, the Host/Origin guard), a golden-fixture parity test between the Python and browser section
+  sense, and GitHub Actions for both. Node now parses `web/js` as ES modules, so a syntax error can't pass the check.
+- **Fixed on the way:** the browser's section sense measured track position half a bar late plus the lead-in, unlike
+  training; a crashed CPU worker froze the brain instead of raising; a fresh clone printed a traceback on every start.
+- **The neurons decide more** (the section above) ships in this release, switched on.
+- **Docs:** the README is a front page (quick start, requirements, platforms, what the fly decides and what's designed,
+  tests, security, troubleshooting, licence); AUDIT.md opens with where things stand.
+

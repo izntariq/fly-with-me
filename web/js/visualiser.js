@@ -17,6 +17,11 @@
 // A small side panel shows the move being made and the neurons whose burst fired it (they ring in the brain, with a line
 // from the card), the queued transition, the drop countdown and the recent moves.
 //
+// Safe mode (photosensitivity): several looks gate, strobe or invert the picture on the 16th note (8-10 Hz, inside the
+// 3-30 Hz range that can trigger seizures). The page opens behind a warning; safe mode is the default when the system
+// asks for reduced motion, and S or the panel button switches it. In safe mode one pass after the looks (soften) lets
+// no light or colour change faster than ~0.5 Hz and drops invert, shake and slices: see SAFE below.
+//
 // Brain activity: the brain server's websocket (the frames the DJ app gets); pokes go back the same way.
 // Moves, decks, beat: the DJ app, over BroadcastChannel('flybrain-dj') (web/js/main.js: hookVisualiser, postState).
 import { MOVES } from './flydj.js';
@@ -82,7 +87,47 @@ const V = {
   hl: null, fx: [], waves: [], lasers: [], confetti: [], titles: [], panel: true,
   earC: null, tapSlot: null, rot: null, L: [], X: null, rotPhase: 0, lastT: clock(),
   user: { yaw: 0, pitch: 0, zoom: 1 }, hover: null, pokes: [], openedAt: clock(),
+  safe: false, soft: null, warn: true,
 };
+
+// ---------------- safe mode ----------------
+// The choice is remembered ('flash' or 'safe'); no choice yet -> the warning shows and nothing is drawn until it's
+// answered (its default button follows prefers-reduced-motion). Storage can throw (private windows): then just ask.
+const SAFE_KEY = 'flybrain-viz-motion';
+const reducedMotion = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+const stored = (() => { try { return localStorage.getItem(SAFE_KEY); } catch { return null; } })();
+function setSafe(on, remember = true) {
+  V.safe = !!on; V.soft = null;
+  if (remember) try { localStorage.setItem(SAFE_KEY, on ? 'safe' : 'flash'); } catch { /* not remembered */ }
+  const b = $('#safe');
+  if (b) { b.textContent = `safe mode: ${on ? 'on' : 'off'}`; b.setAttribute('aria-pressed', String(!!on)); }
+}
+function answerWarning(safe) { setSafe(safe); V.warn = false; $('#warn').hidden = true; glc.focus?.(); }
+if (stored === 'safe' || stored === 'flash') { setSafe(stored === 'safe', false); V.warn = false; $('#warn').hidden = true; }
+else {
+  setSafe(reducedMotion, false);
+  if (reducedMotion) $('#warn-rm').hidden = false;
+  $('#warn-flash').onclick = () => answerWarning(false);
+  $('#warn-safe').onclick = () => answerWarning(true);
+  (reducedMotion ? $('#warn-safe') : $('#warn-flash')).focus();
+}
+$('#safe').onclick = () => setSafe(!V.safe);
+// One pass over the look X after every effect has run, so no effect can get past it. Light and colour (gate,
+// brightness, saturation, size, cloud, wash, tint) and the camera (zoom, nudges, yaw) go through a one-pole low-pass
+// (time constant SAFE.tau: a 16th-note gate at 8.5 Hz keeps ~3% ripple, a 3 Hz flicker ~1/6 of its depth; a step takes
+// ~0.7 s to rise), with the boosts capped; invert, shake and slices are dropped and the beat breathing is scaled down.
+const SAFE = { tau: 0.3, keys: ['gate', 'bright', 'sat', 'size', 'cloud', 'tintK', 'zoom', 'dx', 'dy', 'yaw'],
+  bright: [0.3, 1.4], size: 1.8, wash: 0.1, beat: 0.35, laser: 0.3 };
+function soften(X, dt) {
+  if (!V.safe) return X;
+  X.bright = Math.min(SAFE.bright[1], Math.max(SAFE.bright[0], X.bright)); X.size = Math.min(SAFE.size, X.size);
+  X.wash = X.wash.map((v) => Math.min(SAFE.wash, v));
+  X.invert = 0; X.shake = 0; X.slice = 0; X.beat *= SAFE.beat;
+  const S = V.soft || (V.soft = { ...X, wash: [...X.wash], tint: [...X.tint] }), a = 1 - Math.exp(-dt / SAFE.tau);
+  for (const k of SAFE.keys) X[k] = S[k] += (X[k] - S[k]) * a;
+  for (const k of ['wash', 'tint']) X[k] = S[k] = S[k].map((v, i) => v + (X[k][i] - v) * a);
+  return X;
+}
 
 // ---------------- WebGL ----------------
 const glc = $('#gl'), hudc = $('#hud'), hud = hudc.getContext('2d');
@@ -320,7 +365,7 @@ const LOOK = {
   lpf(X, e, t, k) { const a = hump(k); X.bright *= 1 - 0.5 * a; X.hue -= 0.55 * a; X.size *= 1 + 0.9 * a; X.life *= 1 + a; X.cloud *= 1 - 0.3 * a; },
   hpf(X, e, t, k) { const a = hump(k); X.sat *= 1 - 0.75 * a; X.bright *= 1 + 0.7 * a; X.size *= 1 - 0.45 * a; X.cloud *= 1 - 0.55 * a; },
   resfilter(X, e, t, k) { X.hue += TAU * k; X.sat *= 1.3; X.size *= 1 + 0.4 * hump(k); },
-  loop(X, e, t) { X.now = Math.min(X.now, e.t0 + ((t - e.t0) % e.loop)); X.gate *= 0.75 + 0.25 * Math.cos(TAU * (t - e.t0) / e.loop); },
+  loop(X, e, t) { X.now = Math.min(X.now, e.t0 + ((t - e.t0) % (V.safe ? Math.max(0.4, e.loop) : e.loop))); X.gate *= 0.75 + 0.25 * Math.cos(TAU * (t - e.t0) / e.loop); },   // safe: replays ≤2.5 Hz
   reverse(X, e, t, k) { X.now = Math.min(X.now, e.t0 - (t - e.t0)); X.rotSpeed *= -2; X.hue += Math.PI * hump(k) * 0.5; },
   scratch(X, e, t, k, B) {
     const w = Math.sin(TAU * e.rate * (t - e.t0) / e.spb) * hump(k * 1.1);
@@ -503,7 +548,7 @@ function project(p, f) {
 
 // ---------------- the brain server ----------------
 function connect() {
-  const ws = V.ws = new WebSocket(`ws://${location.host}/ws`);
+  const ws = V.ws = new WebSocket(`ws://${location.host}/ws${location.search}`);
   ws.onmessage = (e) => { const d = JSON.parse(e.data); if (d.type === 'hello') onHello(d); else if (d.type === 'frame') onFrame(d); };
   ws.onclose = () => { $('#stat').textContent = 'brain offline'; setTimeout(connect, 2000); };
 }
@@ -655,10 +700,10 @@ function resize() {
 let lastPanel = 0;
 function draw() {
   requestAnimationFrame(draw);
-  if (V.glLost) return;
+  if (V.glLost || V.warn) { V.lastT = clock(); return; }               // nothing on screen until the warning is answered
   const t = clock(), dt = Math.min(0.1, t - V.lastT), dpr = resize(), W = innerWidth, H = innerHeight;
   V.lastT = t;
-  const B = beatInfo(t), X = V.X = look(t, B);
+  const B = beatInfo(t), X = V.X = soften(look(t, B), dt);
   V.rotPhase += dt * X.rotSpeed;
   V.rot = rotation(X); V.L = layout(X);
   const env = B.env * X.beat, pulse = 1 + 0.012 * env + 0.01 * B.down * X.beat;
@@ -819,7 +864,7 @@ function drawHUD(t, dt, dpr, B, X, listen) {
   g.shadowBlur = 0; g.globalCompositeOperation = 'lighter';
   for (const l of V.lasers) {
     const k = (t - l.t0) / (l.t1 - l.t0);
-    g.strokeStyle = l.col; g.lineWidth = 2.2; g.globalAlpha = 0.75 * (1 - k);
+    g.strokeStyle = l.col; g.lineWidth = 2.2; g.globalAlpha = (V.safe ? SAFE.laser : 0.75) * (1 - k);
     for (let i = 0; i < 6; i++) {
       const ang = l.seed + i * TAU / 6 + t * 1.6 * (i % 2 ? 1 : -1);
       g.beginPath(); g.moveTo(pf.x, pf.y); g.lineTo(pf.x + Math.cos(ang) * W, pf.y + Math.sin(ang) * W); g.stroke();
@@ -938,6 +983,9 @@ glc.addEventListener('wheel', (e) => { e.preventDefault(); V.user.zoom = Math.ma
 glc.addEventListener('dblclick', () => { V.user = { yaw: 0, pitch: 0, zoom: 1 }; });
 
 addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('button, input, select, textarea, [contenteditable]')) return;
+  if (V.warn) return;
+  if (e.key === 's' || e.key === 'S') setSafe(!V.safe);
   if (e.key === 'h' || e.key === 'H') { V.panel = !V.panel; $('#side').classList.toggle('hidden', !V.panel); }
   if (e.key === 'f' || e.key === 'F') {
     const el = document.documentElement;

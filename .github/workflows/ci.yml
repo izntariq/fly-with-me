@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Browser logic (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: DJ logic
+        run: node tools/test_dj_logic.mjs
+      - name: Section sense parity with Python
+        run: node tools/test_sections_parity.mjs
+      - name: Syntax check
+        run: |
+          for f in web/js/*.js tools/*.mjs; do node --check "$f" || exit 1; done
+
+  python:
+    name: Python (Linux, CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (the tested lock)
+        run: pip install -r requirements.lock.txt     # mlx is skipped off Apple silicon by its platform marker
+      - name: Compile
+        run: python -m compileall -q flybrain tools experiments
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+  python-mac:
+    # GitHub's macOS runners may not expose Metal: the GPU parity tests then skip (look for "skipped" in the log)
+    name: Python (macOS Apple silicon, GPU parity if Metal is available)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.lock.txt
+      - name: Tests
+        run: python -m unittest discover -s tests -v

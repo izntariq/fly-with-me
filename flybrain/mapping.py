@@ -51,6 +51,9 @@ def load_annotations() -> pd.DataFrame:
     if os.environ.get("FLYBRAIN_CONNECTOME", "flywire") == "malecns":
         from .malecns import load_annotations as load_malecns
         return load_malecns()
+    if not ANNOT.exists():
+        raise SystemExit(f"missing {ANNOT.relative_to(ROOT)} (the FlyWire neuron annotations): "
+                         "run ./run.sh once to download it")
     a = pd.read_csv(ANNOT, sep="\t", low_memory=False,
                     usecols=["root_id", "pos_x", "pos_y", "pos_z", "super_class", "cell_class",
                              "cell_sub_class", "cell_type", "side", "top_nt"])

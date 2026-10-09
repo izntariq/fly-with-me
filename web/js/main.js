@@ -22,6 +22,11 @@ const S = {
 // the visualiser (viz.html, its own window) hears the moves, decks and beat on this channel
 const bus = 'BroadcastChannel' in window ? new BroadcastChannel('flybrain-dj') : null;
 const absNow = () => performance.timeOrigin + performance.now();          // ms, the same clock in every window
+// settings kept between visits (volume, keyboard shortcuts); storage can throw (private windows, blocked site data)
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, String(v)); } catch { /* not kept */ } },
+};
 
 // ---------------- log ----------------
 function log(html) {
@@ -37,7 +42,7 @@ function log(html) {
 
 // ---------------- brain connection ----------------
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const ws = new WebSocket(`ws://${location.host}/ws${location.search}`);
   S.ws = ws;
   ws.onopen = () => { $('#st-conn').textContent = 'brain online'; $('#st-conn').className = 'pill on'; };
   ws.onclose = () => {
@@ -48,6 +53,7 @@ function connect() {
     const d = JSON.parse(ev.data);
     if (d.type === 'hello') onHello(d);
     else if (d.type === 'frame') onFrame(d);
+    else if (d.type === 'error') log(d.message ? `brain server: ${String(d.message).replace(/</g, '&lt;')}` : 'brain server: running again');
   };
 }
 
@@ -390,6 +396,7 @@ async function pollAnalysis(t, f, r) {
       fails = 0;
       const p = await upload(url, f, ext);
       if (p?.status === 410) { failed(); return; }
+      if (p?.status === 429) { log(`"${t.name}": analysis queue full, using the browser's grid`); return; }
       if (p && !p.ok) { log(`"${t.name}": not uploaded for analysis (the server answered ${p.status})`); return; }
       if (p) { uploads++; hadIt = false; } else if (++sendFails > 3) return;
     } else return;                                  // a 404 right after the upload: this server doesn't analyse tracks
@@ -407,9 +414,26 @@ function upload(url, f, ext) {
 }
 
 // ---------------- start ----------------
+// A failure before the splash goes shows on it and gives the button back (the half-built audio graph is dropped, so a
+// second press starts clean); after it, it goes in the log. Tracks dropped or picked before Start wait in S.queued.
 async function start() {
   if (!S.hello) { $('#splash-msg').textContent = 'waiting for the brain server… (python -m flybrain.server)'; return; }
   $('#btn-start').disabled = true;
+  try { await startUp(); } catch (e) {
+    console.error(e);
+    const why = safeName(e?.message || String(e));
+    if (S.started) { log(`something broke while starting: ${why}`); return; }
+    // (closing fires the old context's statechange: unhook it first, or it puts up a resume button for a dead context)
+    if (S.ctx) S.ctx.onstatechange = null;
+    try { S.ctx?.close(); } catch { /* already closed */ }
+    document.querySelector('#resume')?.remove();
+    S.crate = S.crate.filter((t) => t.file);           // demos rendered before the failure are rendered again
+    Object.assign(S, { ctx: null, mixer: null, ears: null, synth: null, perf: null, dj: null, mc: null });
+    $('#splash-msg').textContent = `the fly couldn't start: ${why}. Press Start to try again (or reload the page).`;
+    $('#btn-start').disabled = false;
+  }
+}
+async function startUp() {
   const ctx = S.ctx = new AudioContext({ latencyHint: 'interactive' });
   // Safari can suspend / interrupt audio (sleep, Bluetooth switch, a call): offer a one-tap resume instead of silence
   const resume = () => ctx.resume().then(() => document.querySelector('#resume')?.remove()).catch(() => {});
@@ -420,12 +444,20 @@ async function start() {
     Object.assign(b.style, { position: 'fixed', left: '50%', top: '12px', transform: 'translateX(-50%)', zIndex: 99, fontSize: '15px', padding: '10px 18px' });
     b.onclick = resume; document.body.append(b);
   };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx.state !== 'running') resume(); });
+  if (!S.visBound) {                                 // once: a retried start must not leave one bound to a dead context
+    S.visBound = true;
+    document.addEventListener('visibilitychange', () => {
+      const c = S.ctx;
+      if (!document.hidden && c && c.state === 'suspended') c.resume().then(() => document.querySelector('#resume')?.remove()).catch(() => {});
+    });
+  }
   const mixer = S.mixer = new Mixer(ctx);
+  mixer.vol = +$('#volume').value;                  // silent until the decks start, then a 2 s fade up to it
   const bands = S.hello.inputs.filter((c) => c.ear).map((c) => ({ name: c.name, ear: c.ear, lo: c.lo, hi: c.hi }));
   S.bands = bands;
   S.ears = new Ears(ctx, mixer, bands);
   S.synth = new FlySynth(ctx, mixer.master, S.hello.outputs);
+  S.synth.midi = S.midiOuts?.get($('#midi-out').value) || null;     // a MIDI port picked before Start
   S.perf = new Performer(mixer, S.synth, log);
   S.perf.onActivity = lightPad;
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
@@ -490,13 +522,14 @@ async function start() {
   S.crate.push(await jobs.shift()());
   $('#splash').classList.add('gone');
   S.started = true;
+  mixer.fadeIn(2);
   loadNext(0);
   loadNext(1);
   log('the fly is listening: left ear on deck A, right ear on deck B');
   renderCrate();
   startClock(control, 25);
   requestAnimationFrame(anim);
-  initMidi();
+  if (S.queued.length) addFiles(S.queued.splice(0));       // tracks dropped before Start: into the crate now
   for (const job of jobs) { S.crate.push(await job()); renderCrate(); }
 }
 
@@ -685,6 +718,7 @@ function buildKind() { const v = $('#build-kind').value; return v === 'auto' ? (
 function bindPerformance() {
   S.fxBeats = 1;
   const keyMap = {};
+  for (const k of Object.keys(PAD_OF)) delete PAD_OF[k];          // (bound again on a retried start)
   document.querySelectorAll('.pad').forEach((b) => {
     const act = b.dataset.act, name = act.startsWith('fx:') || act.startsWith('sample:') ? act.split(':')[1]
       : act.startsWith('build') ? 'build' : act.split(':')[0];
@@ -695,6 +729,7 @@ function bindPerformance() {
   });
   PAD_OF.echo = [...(PAD_OF.echo || []), ...(PAD_OF.echoout || [])];
   keyMap[' '] = 'build:4';
+  S.keyMap = keyMap;
   $('#beats').querySelectorAll('button').forEach((b) => b.onclick = () => {
     $('#beats').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
     b.classList.add('sel'); S.fxBeats = +b.dataset.b;
@@ -704,7 +739,7 @@ function bindPerformance() {
   $('#min-on').oninput = (e) => { S.dj.minOnAir = +e.target.value; $('#min-on-val').textContent = `${e.target.value} s`; };
   // "play like" DJ styles
   const sel = $('#persona');
-  for (const [k, st] of Object.entries(STYLES)) { const o = document.createElement('option'); o.value = k; o.textContent = st.name; sel.append(o); }
+  if (!sel.options.length) for (const [k, st] of Object.entries(STYLES)) { const o = document.createElement('option'); o.value = k; o.textContent = st.name; sel.append(o); }
   const applyPersona = () => {
     S.dj.setPersona(sel.value);
     const st = S.dj.persona;
@@ -719,7 +754,7 @@ function bindPerformance() {
   };
   sel.onchange = applyPersona;
   // set planner
-  for (const [k, a] of Object.entries(ARCS)) { const o = document.createElement('option'); o.value = k; o.textContent = a.name; $('#arc').append(o); }
+  if (!$('#arc').options.length) for (const [k, a] of Object.entries(ARCS)) { const o = document.createElement('option'); o.value = k; o.textContent = a.name; $('#arc').append(o); }
   $('#set-start').onclick = () => {
     const k = $('#arc').value, min = +$('#set-len').value;
     S.dj.startSet(k, min); S.arcHistory = [];
@@ -739,15 +774,20 @@ function bindPerformance() {
     taps.push(now); if (taps.length > 6) taps.shift();
     if (taps.length >= 3) { const bpm = 60000 * (taps.length - 1) / (taps[taps.length - 1] - taps[0]); setBase(bpm); log(`tap tempo → ${bpm.toFixed(1)} BPM`); }
   };
+  // Single-key shortcuts (once, even if Start is pressed again after a failure). They can be switched off (WCAG
+  // 2.1.4), and a focused control keeps its own keys: Space on a focused button presses it, not BUILD & DROP.
+  if (S.keysBound) return;
+  S.keysBound = true;
   const cueKeys = { 1: [0, 0], 2: [0, 1], 3: [0, 2], 4: [0, 3], 7: [1, 0], 8: [1, 1], 9: [1, 2], 0: [1, 3] };
   document.addEventListener('keydown', (e) => {
-    if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    if (!S.keysOn || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    if (e.target.closest?.('button, input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
     const k = e.key.toLowerCase();
     if (k in cueKeys && S.started) { const [d, c] = cueKeys[k]; S.perf.hotCue(S.mixer.decks[d], c); return; }
     // by key position: with Shift, e.key is '_' / '+'
     const up = ['Equal', 'NumpadAdd'].includes(e.code) || e.key === '=' || e.key === '+', down = ['Minus', 'NumpadSubtract'].includes(e.code) || e.key === '-' || e.key === '_';
     if ((up || down) && S.tempo) { S.tempo.base += (up ? 1 : -1) * (e.shiftKey ? 0.1 : 1); S.tempo.glideTo = null; manualTempo(); return; }
-    const act = keyMap[k];
+    const act = S.keyMap[k];
     if (act) { e.preventDefault(); runAct(act, e.shiftKey); lightPad(act.startsWith('build') ? 'build' : act.split(':')[1] || act); }
   });
 }
@@ -904,6 +944,8 @@ function hookVisualiser() {
       S.trigger = null;
     }
   };
+  if (S.busHooked) return;                          // (a second Start after a failure)
+  S.busHooked = true;
   bus?.addEventListener('message', (e) => {
     if (e.data?.type === 'sync?') { bus.postMessage({ type: 'sync', moves: S.recentMoves || [] }); postState(); }
   });
@@ -929,6 +971,19 @@ function postState() {
 }
 
 function bindGlobalUI() {
+  // master volume (after the ceiling; recordings and the fly's room-mix ears are taken before it)
+  const vol = $('#volume'), showVol = () => { const v = +vol.value; $('#volume-val').textContent = v > 0 ? `${(20 * Math.log10(v)).toFixed(0)} dB` : 'off'; };
+  const v0 = +store.get('flybrain-volume', '0.5');
+  vol.value = Number.isFinite(v0) ? Math.max(0, Math.min(1, v0)) : 0.5; showVol();
+  vol.oninput = () => { showVol(); S.mixer?.setVolume(+vol.value); store.set('flybrain-volume', vol.value); };
+  // keyboard shortcuts on / off; a mouse click doesn't leave a button focused (its focus would swallow the shortcuts)
+  const keys = $('#keys');
+  keys.checked = store.get('flybrain-keys', '1') !== '0'; S.keysOn = keys.checked;
+  keys.onchange = () => { S.keysOn = keys.checked; store.set('flybrain-keys', keys.checked ? '1' : '0'); };
+  // a control used with the mouse hands its focus back, so the single-key shortcuts keep working (keyboard focus stays)
+  document.addEventListener('click', (e) => { const b = e.detail > 0 && e.target.closest?.('button'); if (b) b.blur(); });
+  document.addEventListener('pointerup', (e) => { const el = e.target.closest?.('input[type=range], input[type=checkbox]'); if (el) setTimeout(() => el.blur(), 0); });
+  S.queued = [];
   $('#btn-viz').onclick = () => window.open('viz.html', 'flybrain-viz', 'popup,width=1440,height=860');
   $('#btn-start').onclick = start;
   $('#xfader').oninput = (e) => { S.mixer.setCrossfader(+e.target.value); S.dj.userHold = 8; };
@@ -942,21 +997,31 @@ function bindGlobalUI() {
   $('#btn-sugar').onclick = () => { S.feed.sugar = performance.now() + 3000; log('🍬 sugar on the proboscis (sugar gustatory neurons, 3 s)'); };
   $('#btn-bitter').onclick = () => { S.feed.bitter = performance.now() + 3000; log('🍋 bitter taste (bitter gustatory neurons, 3 s)'); };
   $('#btn-reset').onclick = () => { send({ type: 'reset' }); log('brain reset: all membrane potentials back to rest'); };
-  $('#file-in').onchange = (e) => S.ctx && addFiles(e.target.files);
+  // before Start there's no audio context to decode with: hold the files, say so on the splash
+  const take = (files) => {
+    if (S.started) { addFiles(files); return; }
+    S.queued.push(...files);
+    $('#splash-msg').textContent = `${S.queued.length} file${S.queued.length > 1 ? 's' : ''} waiting: they go in the crate when you press "Start the fly"`;
+  };
+  $('#file-in').onchange = (e) => { take([...e.target.files]); e.target.value = ''; };
   document.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
   document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
   document.addEventListener('drop', (e) => {
     e.preventDefault(); document.body.classList.remove('dragging');
-    if (S.ctx) addFiles(e.dataTransfer.files); else log('press "Start the fly" first, then drop tracks');
+    take([...e.dataTransfer.files]);
   });
   $('#btn-rec').onclick = toggleRecord;
   $('#btn-export').onclick = exportSet;
   $('#crate-style').onchange = (e) => { S.style = e.target.value; S.crateNext = 0; renderCrate(); scheduleTrim(); log(`crate style → ${S.style}; the fly picks from it at the next track change`); };
-  $('#midi-out').onchange = (e) => { S.synth.midi = S.midiOuts?.get(e.target.value) || null; };
+  $('#midi-out').onchange = (e) => { if (S.synth) S.synth.midi = S.midiOuts?.get(e.target.value) || null; };
+  // MIDI permission is asked only when you go to pick a port, not on every Start
+  for (const ev of ['focus', 'pointerdown']) $('#midi-out').addEventListener(ev, initMidi);
 }
 
+let midiAsked = false;
 async function initMidi() {
-  if (!navigator.requestMIDIAccess) return;
+  if (midiAsked || !navigator.requestMIDIAccess) return;
+  midiAsked = true;
   try {
     const acc = await navigator.requestMIDIAccess();
     S.midiOuts = acc.outputs;

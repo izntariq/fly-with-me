@@ -7,7 +7,7 @@ const DESI = ['Balle balle!', 'Oye hoye!', 'Chak de phatte!', "Let's go!"];
 export class MC {
   constructor(log) {
     this.log = log;
-    this.enabled = true;
+    this.enabled = false;                  // off unless the #mc box is ticked (it's off by default)
     this.last = -1e9;
     this.ok = typeof speechSynthesis !== 'undefined';
     this.voice = null;
@@ -37,7 +37,7 @@ export class MC {
     setTimeout(() => {
       const u = new SpeechSynthesisUtterance(text);
       if (this.voice) u.voice = this.voice;
-      u.rate = 1.05; u.pitch = 0.8; u.volume = 1;
+      u.rate = 1.05; u.pitch = 0.8; u.volume = 0.6;   // speech plays outside the mixer's ceiling and volume
       speechSynthesis.cancel(); speechSynthesis.speak(u);
       this.log(`🎤 the fly on the mic: "${text}"`);
     }, Math.max(0, delay * 1000));

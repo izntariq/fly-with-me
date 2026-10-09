@@ -11,7 +11,15 @@ Version 2:
   3. classifier: multinomial logistic regression (numpy, L2), trained on whole tracks, tested on held-out tracks.
   4. arrangement prior: an online HMM over intro -> main <-> break -> outro, with the track position (how much of
      the deck is left, which a DJ always knows) shaping the intro / outro odds.
-The app runs the same model in the browser (web/js/sections.js) from brains/sections.json.
+
+Version 3 (what tools/train_sections.py --export writes now, "version": 3 in the spec) keeps 2-4 and adds: labels
+from All-In-One (label_allin1: intro / verse / chorus / break / outro), the app's own per-bar energy as two more
+features (energy_features), and the arrangement (transitions, start, position prior) learned from the labelled tracks
+(learn_arrangement) instead of hand-set.
+
+The app runs the same model in the browser (web/js/sections.js) from brains/sections_<brain>.json: the server loads
+sections_trained.json or sections_naive.json, matching the brain it runs. tests/test_sections.py and
+tools/test_sections_parity.mjs check the two implementations against one golden fixture.
 """
 from __future__ import annotations
 
