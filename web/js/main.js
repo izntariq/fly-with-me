@@ -430,6 +430,7 @@ async function start() {
   S.perf.onActivity = lightPad;
   S.dj = new FlyDJ(mixer, S.ears, S.synth, S.perf, S.hello.outputs, log);
   S.dj.epic = +$('#epic').value;
+  S.dj.neuronsDecide = $('#neurons').checked;
   S.dj.trained = !!S.hello.trained;
   if (S.hello.trained?.readout) {
     if ((S.hello.flies || 1) >= 2) S.dj.setListeners(S.hello.trained.readout, S.hello.outputs);
@@ -932,6 +933,7 @@ function bindGlobalUI() {
   $('#btn-start').onclick = start;
   $('#xfader').oninput = (e) => { S.mixer.setCrossfader(+e.target.value); S.dj.userHold = 8; };
   $('#auto').onchange = (e) => { S.dj.auto = e.target.checked; log(`fly autopilot ${S.dj.auto ? 'on' : 'off'}`); };
+  $('#neurons').onchange = (e) => { S.dj.neuronsDecide = e.target.checked; log(e.target.checked ? 'the <b>neurons decide more</b>: exits, track picks and move variants' : 'exits, track picks and move variants follow the designed rules'); };
   $('#ears-room').onchange = (e) => { S.ears.setMode(e.target.checked ? 'room' : 'split'); log(`fly ears: ${e.target.checked ? 'room mix (it hears itself)' : 'split cue, A left / B right'}`); };
   $('#voice-level').oninput = (e) => { S.dj.voiceLevel = +e.target.value; };
   $('#quantize').onchange = (e) => { S.synth.quantize = e.target.checked; };

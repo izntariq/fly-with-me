@@ -85,8 +85,11 @@ measured in the browser; the beat grid and song structure come from the song ana
 * **Why the fly changes tracks.** It *wants* to leave when its left/right preference points to the other deck and its
   ear on the on-air deck has habituated (over ~75 s, tracked in `web/js/ears.js`). It stays on each track at least
   45 s (a slider). Then:
-  * on an analysed track it mixes out at the planned exit (the outro, or about 12 bars before the end); earlier only
-    from a breakdown in the last 40% of the track, if it wants to leave; and after 4 minutes on air at the latest
+  * on an analysed track it mixes out at the planned exit (the outro, or about 12 bars before the end) unless its
+    neurons choose an earlier one: any section boundary in the second half of the track is an exit the DJ fly takes
+    if its steering neurons have kept turning toward the other deck (held over ~8 s, decided 4 bars ahead, landing
+    exactly on the boundary). After 4 minutes on air at the latest. With *neurons decide more* off, it leaves early
+    only from a breakdown in the last 40% of the track, if it wants to
   * on other tracks it waits for an outro its listener fly senses or, if it wants to leave, a confident breakdown in
     the last 30% of the track; failing those, 4 minutes on air or the track ending
   * the off-air deck is restocked from the crate and beat-matched. A deck whose track was on air for 10 s or more gets a
@@ -117,7 +120,9 @@ measured in the browser; the beat grid and song structure come from the song ana
 - The model (`brains/sections_trained.json`) was fitted on 107 of 131 recorded real tracks against All-In-One labels.
 
 The structure comes from the analyzer or the classifier, not from the fly's judgement. The fly is the performer:
-its neurons decide when to act, which move, which transition style, and which track comes next.
+its neurons decide when to act, which move and which variant of it, which transition style, when to leave a track
+(among the analysis's section boundaries) and which track comes next. The *neurons decide more* toggle turns the
+last three back into designed rules, for comparison.
 
 ## DJ moves
 
@@ -175,8 +180,10 @@ With key lock on, DJ styles can move the tempo up to 20% and the fly can blend t
 
 **Track selection.** When the off-air deck needs a new record, the fly previews up to 3 candidates in its cue ear
 (5 s each, from their drop, like a DJ in headphones). It scores each by how hard the descending neurons of that
-deck's listener fly fire, discounts tracks it has already played, favours harmonic neighbours and close tempos, and
-loads the winner. Scores show in the crate (🎧). It doesn't audition in the on-air track's last 90 s unless the other
+deck's listener fly fire, and by the pattern: which descending cell types fire, against that listener's baseline,
+compared with the on-air track's pattern. An aroused DJ fly (its descending population above its slow baseline)
+favours the candidate that excites its listener most like the track on air; a calm one favours the most different.
+It discounts tracks it has already played, favours harmonic neighbours and close tempos, and loads the winner. Scores show in the crate (🎧). It doesn't audition in the on-air track's last 90 s unless the other
 deck is empty. A deck whose track was just on air is restocked anyway: auditioned if the on-air track has more than
 30 s left, otherwise loaded straight from the crate. Turn autopilot off and it goes back to crate order.
 
@@ -204,7 +211,8 @@ analysis.
 - **Pace:** a moves-per-minute target (default 8) slowly adapts the burst threshold. The strongest bursts still pick
   the moves.
 - **Fit:** moves are swapped for ones that suit the section (filters and space in intros and outros, space in
-  breakdowns), and each family rotates its variants. With the default style, now and then a strong burst in a chorus
+  breakdowns). Within a family (echo / reverb / dub, trans / crush / stutter …) the cell type that led the burst picks
+the variant, never the same one twice in a row. With the default style, now and then a strong burst in a chorus
   plays a big move (live chops, bass tease or drums out, pump, acid, sing-along).
 - **Transitions** land on 16-beat phrase lines, or on an analysed track's planned exit bar. Each style starts early by
   its own lead, so its cut or drop lands on the line. The style comes from whichever neuron group is most excited:

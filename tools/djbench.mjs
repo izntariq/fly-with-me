@@ -5,6 +5,8 @@
 //   PORT=8766 MODE=new RUNS=3 MIN=8 SET=random:24:1 node tools/djbench.mjs
 //     MODE  new = section sense + phrase-timed, section-fitting moves + the section mixing gate
 //           old = the earlier behaviour (rank-detector sense, moves fired at once, no section gate)
+//     NEURONS  1 = the neurons decide more (exits at section boundaries, track picks by neuron pattern, move variants by
+//              the leading cell type), 0 = the designed rules for those; unset = the app's default (1)
 //     SET   heldout          held_out.json (fold 0 of the first crate, kept out of training). It has been the
 //                            development set for 10+ bench runs: not a test set any more
 //           fresh            test_fresh.json: the first 48 tracks of the label queue, analysed before the grid fit and
@@ -40,7 +42,7 @@ import { scoreFile, report, legacySummary } from './djscore.mjs';
 
 // ---------------- the page side (serialised into the page: no outside references) ----------------
 // crate: the tracks, shuffled by the run's seed; the first two go on the decks
-export async function setup({ names, seed, mode }) {
+export async function setup({ names, seed, mode, neurons }) {
   const S = window.flyDJ, files = [];
   for (let i = 0; i < names.length; i++) files.push(new File([await (await fetch(`/__track/${i}`)).blob()], names[i] + '.mp3'));
   await S.api.addFiles(files);
@@ -53,6 +55,7 @@ export async function setup({ names, seed, mode }) {
   S.api.loadTrack(0, S.crate[0]); S.api.loadTrack(1, S.crate[1]); S.crateNext = 2;
   const neu = mode === 'new';
   S.dj.useSections = neu; S.dj.phraseMoves = neu; S.dj.sectionFit = neu;
+  if (neurons != null && 'neuronsDecide' in S.dj) S.dj.neuronsDecide = neurons;
 }
 
 export function instrument({ names, slugs, labels, seed }) {
@@ -200,7 +203,7 @@ export function instrument({ names, slugs, labels, seed }) {
   const planned = (p) => {
     const t = now(), d = p.src || mx.onAir(), inc = decks[1 - di(d)];
     const tr = { v3: 1, style: p.style, style0: p.style, reason: p.reason || '', at: labelOf(d), t: r3(t), tPlan: r3(t), planAt: r3(p.at), planLand: r3(p.landT),
-      atExit: p.atExit ?? null, known: known(d), outDeck: di(d), outSlug: slug(d), inSlug: slug(inc), outDur: r3(d.duration), inDur: r3(inc?.duration), replans: 0, pp: { plan: r3(d.position(t)) } };
+      atExit: p.atExit ?? null, exitBar: p.exitBar ?? null, known: known(d), outDeck: di(d), outSlug: slug(d), inSlug: slug(inc), outDur: r3(d.duration), inDur: r3(inc?.duration), replans: 0, pp: { plan: r3(d.position(t)) } };
     if (p.landT === undefined) miss('pending.landT');
     L.trans.push(tr); recOf.set(p, tr);
   };
@@ -318,6 +321,8 @@ async function main() {
   const root = new URL('..', import.meta.url).pathname, data = process.env.DATA || root + 'data';
   const port = process.env.PORT || 8765, mode = process.env.MODE || 'new', runs = +(process.env.RUNS || 3), mins = +(process.env.MIN || 8);
   const SET = process.env.SET || 'heldout';
+  // NEURONS=1 / 0: the neurons decide more (exits, track picks, move variants) or the designed rules; unset: the app's default
+  const neurons = process.env.NEURONS == null ? null : process.env.NEURONS !== '0';
   const { pick, pool } = pickSet(SET, data);
   if (SET === 'heldout') console.log('note: the held-out set has been the development set; SET=random:<n>:<seed> draws unused tracks');
   if (pool !== undefined) console.log(`SET ${SET}: ${pick.length} of ${pool} never-used analysed tracks: ${pick.map((t) => t.slug).join(', ')}`);
@@ -337,7 +342,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#splash-msg').textContent.startsWith('connected'));
     await page.click('#btn-start');
     await page.waitForSelector('#splash.gone', { state: 'attached', timeout: 90000 });
-    await page.evaluate(setup, { names: pick.map((t) => t.name), seed, mode });
+    await page.evaluate(setup, { names: pick.map((t) => t.name), seed, mode, neurons });
     await page.evaluate(instrument, { names: pick.map((t) => t.name), slugs: pick.map((t) => t.slug), labels, seed });
     await page.waitForTimeout(mins * 60 * 1000);
     const raw = await page.evaluate(() => window._bench.collect());
@@ -350,7 +355,7 @@ async function main() {
   }
   mkdirSync(data + '/bench', { recursive: true });
   const out = data + `/bench/${mode}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
-  const file = { v: 3, mode, set: SET, port, runs, mins, tracks: pick.length, slugs: pick.map((t) => t.slug), labels: labFile, all };
+  const file = { v: 3, mode, neurons, set: SET, port, runs, mins, tracks: pick.length, slugs: pick.map((t) => t.slug), labels: labFile, all };
   writeFileSync(out, JSON.stringify(file, null, 1));                  // the raw record first: scoring can't lose it
   const sc = scoreFile(file);
   Object.assign(file, { agg: sc.legacy, score: sc.agg });

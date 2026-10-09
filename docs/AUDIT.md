@@ -824,3 +824,118 @@ the same crate):
 - The fixes were made in separate worktrees, merged, then reviewed again by five more reviewers.
 - That second review found two high-severity bugs the fixes themselves had introduced, so review fixes before merging.
 - Tests and benchmarks ran on port 8766 only, one server at a time.
+
+## Audit 5: release readiness, as a production open-source product (8 October)
+
+*Commit 4f26b06, branch `fork/steady-mix`.* The question this time is not "is the DJ good" but "could a stranger clone,
+run, trust and contribute to this?". Six read-only reviewers covered security and the server, install and portability,
+licensing and privacy, code quality and tests, the web app's UX, and the docs and claims. The serious findings were
+re-checked in the code. Nothing was run except `node tools/test_dj_logic.mjs` (27/27 pass) and syntax checks; no
+server was started.
+
+### Verdict
+
+**The engine and the server are in good shape; the release around them isn't.** The default server is safe
+(localhost only, Host/Origin checks, capped uploads, no path traversal, no pickle), the simulation is well guarded
+(clamped drive, runaway reset, bounded per-client queues), and the docs are unusually candid about negative results.
+
+**Not shippable as it stands.** Four things block a public release of this branch: it has no licence files, the
+visualiser strobes at seizure-risk rates with no warning, the committed brain files carry FlyWire weights under the
+wrong licence, and the history and docs carry private material. After those, the gaps are the usual ones for a
+research project turned product: an unpinned, unchecked install, no CI, a README that reads as a lab notebook, and an
+app that starts loud.
+
+The public repo (izntariq/fly-with-me) is at v1.12 from 29 September, on a separate rewritten history; this branch is
+62 commits and about 11k lines ahead of the local `main`. Publishing is a port, not a push.
+
+### Release blockers
+
+| # | Finding | Where | Fix |
+|---|---|---|---|
+| B1 | **No LICENSE, NOTICE, CITATION.cff or CONTRIBUTING.md.** They exist only on the public history (v1.12); no local branch ever had them. Publishing this branch as-is ships unlicensed code and drops the FlyWire CC BY-NC 4.0 warning. `flybrain/validate.py`, which public CONTRIBUTING tells people to run, is also missing here. | repo root | Port the four files; add male-CNS (CC BY 4.0) and All-In-One to NOTICE and CITATION.cff; restore `validate.py` or point CONTRIBUTING at `tools/gpucheck.py`. Add a Licence section to the README. |
+| B2 | **The visualiser strobes.** `gate`, `fill` and late `build` cut brightness to 10–25% on every 16th note (≈8.5 Hz at 128 BPM); `laser` flickers at ≈9.5 Hz (`sin(t*60)`); `drop` inverts colours for a 16th. All inside the 3–30 Hz photosensitive range, triggered unpredictably by the fly, often full-screen. No warning, no `prefers-reduced-motion`. | `web/js/visualiser.js:318-357` | A warning before the first frame; honour `prefers-reduced-motion` plus a toggle that caps flashes under 3 Hz and drops invert and shake. |
+| B3 | **Committed brains are FlyWire-derived.** `brains/trained_brain*.npz` hold `K` (synapse indices), `w0` (the original FlyWire weights) and the trained weights; `readout.json` and `recruited_neurons.json` list FlyWire root IDs. FlyWire is CC BY-NC; the repo is Apache-2.0, and public CONTRIBUTING forbids committing derived data. | `brains/` | Either ship them as a release asset under CC BY-NC 4.0, or keep them and say in NOTICE that `brains/` is CC BY-NC, not Apache. Drop the three unused snapshots (`_v2`, `_split`, `_fit_r2`). |
+| B4 | **Private material in history and docs.** 17 commit messages on this branch quote the owner's requests (2 after the branch point, the rest shared with `main` and tags v0.1–v1.11). Every commit is authored with a personal address. HANDOFF.md is written for the next chat and the owner's setup; GIT.md says the repo lives only on this Mac; the tracked `.claude/settings.json` allowlists unrelated personal tools. | history, `docs/HANDOFF.md`, `docs/GIT.md`, `.claude/settings.json` | Port onto public main with cleaned messages and the noreply author; never push local `main` or its tags. Replace HANDOFF with a contributor ROADMAP; untrack or trim `.claude/settings.json`. |
+
+### High
+
+| # | Finding | Where | Fix |
+|---|---|---|---|
+| H1 | **Starts loud, no volume control, no real limiter.** Master gain 0.9 into a DynamicsCompressor (−6 dB, 12:1, 3 ms attack) with automatic makeup gain: transients and the 1.4× boosts can clip. Both decks start on "Start the fly". The MC voice (on by default) plays at volume 1 outside the limiter. | `web/js/decks.js:9-16`, `main.js:497`, `mc.js:40` | Master volume slider defaulting to ~0.5, a fade-in on start, a true ceiling last in the chain, MC off by default. |
+| H2 | **The README is a lab notebook and claims more than was measured.** No screenshot, no fresh-clone quick start (`git clone`, `pip install`), requirements at line ~320, HANDOFF and AUDIT in the front-page doc table. The tagline says the fly's neurons DJ, but training gave no significant section-sense gain, the brain doesn't beat its own ear input, exits come from All-In-One, habituation is JavaScript, and track choice is discounted by hand-written rules. | `README.md` | Short pitch, GIF, quick start, requirements, troubleshooting first. Lift NOTES §5 "What's biology and what's design" into the README as a table. Label docs by audience. |
+| H3 | **The install isn't reproducible or checked.** `requirements.txt` is unpinned with no Python version (only 3.12 tested). `run.sh` clones Shiu's repo at whatever main is, and `curl -sL` (no `-f`, no checksum) can save an error page as `neuron_annotations.tsv`, which then passes the exists-check forever. No setup recipe at all for `.venv-allin1`, so strangers never get the analysed mixing the README features. Node: `playwright-core: "*"`, lockfile git-ignored, Chrome path hard-coded in six tools. | `requirements.txt`, `run.sh:8-14`, `tools/package.json`, `.gitignore` | A lock file and `requires-python`; pin the Shiu commit; `curl -fsSL` to a `.part` file with `shasum -a 256 -c`; `requirements-allin1.txt` and a setup script; commit the Node lockfile. |
+| H4 | **No CI and no Python tests.** No `.github/`, no pytest, no `npm test`. `gpucheck.py` and `cnscheck.py` print numbers with no asserts. The Python section model and its JavaScript re-implementation (`sections.py` / `sections.js`) have no parity test, and their comments have already drifted. | missing | A GitHub Actions job running `test_dj_logic.mjs` and `py_compile` now; then pytest for the LIF step on a toy CSR, `Analyses` states and websocket clamping; a golden-fixture parity test for sections. |
+
+### Medium
+
+- **Uploads can fill the disk** (`server.py:396-439`, `Analyses.start`). Each upload is capped at 400 MB, but the number
+  waiting isn't: dropping a folder of 300 WAVs queues tens of GB behind a one-at-a-time analyser. The client also picks
+  the extension (`X-Ext`, line 402); `json` or `failed` collide with the analyser's own result and failure files and
+  mark the track failed for good. Fix: cap queued count and bytes (429 when full), one worker with a bounded queue, an
+  audio-extension allowlist.
+- **LAN mode has no authentication** (`--host`). Any device on the network can drive the flies, poke neurons and upload.
+  Documented in NOTES, not the README. Fix: a random token printed at start-up, and a README warning.
+- **A dead CPU worker is never replaced** (`loop`, `RemoteFly`). The loop retries every second forever; the page stays
+  connected and silent, and other flies' replies can end up one frame off. Same freeze for a persistent GPU error.
+  Fix: respawn and drain on failure; after N failures tell the clients.
+- **Start-up failures hang the splash** (`main.js:410-503`): no try/catch, and the Start button is already disabled.
+  Start also asks for MIDI permission unprompted (`initMidi`), and files dropped before Start are silently ignored.
+- **Keyboard and screen readers.** Single-key shortcuts are global and can't be turned off (WCAG 2.1.4); Space on a
+  focused button also fires BUILD & DROP. No ARIA anywhere: the crossfader is unlabelled, the move log isn't a live
+  region, canvases have no text alternative.
+- **Platforms and sizes aren't stated.** `run.sh` uses macOS `open` (errors hidden). The CPU path hasn't been
+  re-measured since the refractory fix, and 3 CPU flies on a 4–8 core Linux box may not keep real time. The first run
+  silently downloads ~400 MB and writes a 117 MB cache.
+- **Citations and data terms are incomplete.** No paper citation for the male CNS; Matsliah et al. 2024 and Berg et
+  al. 2025 (asked for by annotation release ≥3.0) are missing locally; All-In-One isn't in a citation file. The analysis
+  chain installs madmom, whose models are CC BY-NC-SA, and `sections_trained.json` was fitted on All-In-One labels —
+  verify what that means for its licence.
+- **Releases stopped at v1.11.** Nothing on this branch is tagged, the CHANGELOG is a themed narrative with no versions
+  or Unreleased section, and the public repo has no GitHub Releases.
+- **This file opens with Audit 1's verdict**, which later audits retracted. A reader who stops at the top gets the wrong
+  answer. Put a current summary first and mark the rest as history.
+
+### Low
+
+- A malformed websocket message (bad JSON, a non-object, `float("x")`) throws out of `ws_handler` (`server.py:351`)
+  and closes that socket; if it was the driver, every drive level resets.
+- A fresh clone prints a `FileNotFoundError` traceback on every start: `_index_library` writes
+  `data/realtracks/hash_index.tmp` but nothing creates `data/realtracks/`.
+- Missing data gives raw pandas tracebacks; a clone that fails part-way leaves `vendor/Drosophila_brain_model` and
+  every later `run.sh` stops at "destination path already exists".
+- `analyze_tracks`, `djbench`, `onairtest`, `livetest` and `vizfx` default to port 8765, the live app's port, against
+  the project's own testing rule.
+- `S.history` and `S.tracklist` grow without bound; the stems worker holds ~0.5 GB per 4-minute track; nothing adapts
+  to phones.
+- The CPU spike buffer truncates silently where the GPU logs; GPU float atomics aren't bit-reproducible (document before
+  anyone writes an exact-count test); the CSR cache is never checked against its source.
+- No checksum on the 1.1 GB male-CNS download; the library index reads each whole track into memory to hash it;
+  `hello()` is rebuilt on every connect and client count is unbounded.
+- Large functions and module state in the app (`flydj.js tick()` ~164 lines, `main.js` 1026 lines with 25 top-level
+  bindings); no lint or format config; `tools/` mixes tests, benchmarks, pipelines and research.
+- The benchmark figures depend on the owner's private crate and can't be reproduced; say so, or publish the
+  All-In-One analysis JSONs (no audio) so `gridcheck` runs for others.
+- The UI never says a dropped file is copied to the server; no CODE_OF_CONDUCT, SECURITY.md or issue templates.
+
+### Done well
+
+- **Server defaults:** 127.0.0.1, Host and Origin checked (DNS rebinding, `Origin: null` and userinfo tricks refused),
+  uploads size-checked twice and hashed before an atomic rename, analyser run without a shell, with a timeout and `nice`.
+- **Simulation guards:** drive clamped to 0..1, pokes capped, the runaway reset, per-client queues that drop old frames,
+  the loop restarts itself after a failed frame.
+- **Data stays out of the repo:** no audio, lyrics or track names in any commit; FlyWire and the Shiu model are
+  downloaded at run time; no CDNs, fonts or analytics in the app.
+- **Honesty:** NOTES §5 separates biology from design, and negative results are published and corrected in place.
+- **`test_dj_logic.mjs`** runs the real Mixer, Performer and FlyDJ on a recording fake AudioContext, deterministic and
+  CI-ready.
+- **Long-session care in Safari:** decoded tracks freed and re-decoded on demand, a worker-clocked control loop, a reload
+  banner when the server comes back with another brain.
+
+### Suggested order
+
+1. **Release pass (blocks publishing):** B1–B4, then H1 and the README rewrite (H2). Port onto public main as one
+   cleaned series and tag it v2.0 with a GitHub Release.
+2. **Reproducibility pass:** H3 and H4: pinned installs, checked downloads, the allin1 recipe, CI with
+   `test_dj_logic` plus the first pytest tests; tools default to port 8766.
+3. **Robustness pass:** the medium server items (upload cap, extension allowlist, worker respawn, websocket parsing,
+   LAN token), then the start-up, keyboard and accessibility items.

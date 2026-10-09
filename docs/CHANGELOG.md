@@ -422,3 +422,14 @@ exits landing in an outro went from 1 of 4 to 9 of 10, and nothing measured got 
 - **Benchmark:** the crate is put in name order before the seeded shuffle. App versions add a drop in different
   orders, so the same seed had given two versions different crates. That, not the brain, was behind an apparent
   collapse of the listeners' section sense in the first runs of the merged code (AUDIT.md).
+
+### The neurons decide more · `c763638` · Oct 9
+- **When to leave:** on an analysed track, any section boundary in the second half is an exit the DJ fly may take,
+  when its steering neurons have kept turning toward the other deck (held over ~8 s, decided 4 bars ahead, landing
+  exactly on the boundary). It replaces the late-breakdown rule, which leaned on the browser's ear habituation.
+- **Which track:** each auditioned candidate's listener response is kept as a pattern over descending cell types and
+  compared with the on-air track's. An aroused DJ fly keeps the sound going, a calm one changes it up.
+- **Which variant:** the cell type that led a burst picks the move's variant (echo / reverb / dub …).
+- A *neurons decide more* toggle (on by default) brings back the designed rules; `djbench` takes `NEURONS=0/1`, and
+  `djscore` counts neuron-chosen exits as their own driver. `test_dj_logic`: 34 checks.
+- Not measured live yet: a same-seed `djbench` comparison with `NEURONS=1` against `NEURONS=0` is the next step.

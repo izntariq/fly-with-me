@@ -21,7 +21,8 @@
 // The bar measures are what the grid and the timing deliver. The section measures stay partly circular on analysed
 // tracks, since the app plans its exits and picks moves from these same segments: that is why everything is also split
 // by what drove the decision.
-//   transitions  exit (planned from the analysed exit) · sense (the fly's own sense or wish: a sensed outro or
+//   transitions  exit (planned from the analysed exit) · neurons (an earlier section boundary of an analysed track,
+//                chosen by the DJ fly's steering neurons) · sense (the fly's own sense or wish: a sensed outro or
 //                breakdown, aversion, its preference) · cap (4 minutes on air) · ending (the track running out) ·
 //                burst (the old app's aversion spinback, fired straight from a burst)
 //   moves        burst (neuron-group bursts, big bursts, arousal builds, motor-neuron horns) · sense (SPACE: the fly's
@@ -212,7 +213,7 @@ export function appGrid(a, version) {                                       // �
 }
 
 // ---------------- what drove a decision; what suits a section ----------------
-export const transDriver = (t) => t.driver || (/analysed\)|planned exit/.test(t.reason || '') ? 'exit' : /4 minutes/.test(t.reason || '') ? 'cap'
+export const transDriver = (t) => t.driver || (/steering neurons/.test(t.reason || '') ? 'neurons' : /analysed\)|planned exit/.test(t.reason || '') ? 'exit' : /4 minutes/.test(t.reason || '') ? 'cap'
   : /track ending/.test(t.reason || '') ? 'ending' : t.reason ? 'sense' : 'other');
 const moveDriver = (m, v3) => (!v3 ? (/^sense:/.test(m.key) ? 'sense' : 'burst')
   : m.driver === 'sense' && m.known ? 'sense_analysed' : m.driver === 'transition' ? 'burst' : m.driver || 'burst');

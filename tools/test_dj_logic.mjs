@@ -250,6 +250,46 @@ test(() => {
   check('idle_send_pinned_at_start', c.some((x) => x[0] === 'set' && x[1] === 0 && x[2] === 3) && !c.some((x) => x[0] === 'hold'), { calls: c.map((x) => x.join(' ')) });
 });
 
+// 15. the neurons pick the exit: a DJ fly steering toward the other deck leaves an analysed track at an earlier section
+// boundary (here the breakdown at bar 60), landing on it; a content fly waits for the planned exit; never in the first half
+const shaped = (name) => track(name, { dur: 112 * 4 * 60 / 128, mixBar: 96, sections: Array.from({ length: 112 }, (_, i) =>
+  (i < 8 ? 'intro' : i < 60 ? 'chorus' : i < 76 ? 'break' : i < 96 ? 'chorus' : 'outro')) });
+for (const [pref, startBar, want, name] of [[0.5, 52, 60, 'neurons_pick_early_exit'], [0, 52, null, 'content_fly_waits_for_planned_exit'],
+                                            [-0.5, 52, null, 'fly_steering_to_on_air_deck_stays'], [0.5, 2, null, 'no_neuron_exit_in_first_half']]) {
+  test(() => {
+    const { dj, A } = setup({ a: shaped('outgoing'), b: analysed('incoming', 100, 90), x: 0 });
+    dj.minOnAir = 0; dj.pref = pref;
+    A.play(CTX.currentTime, startBar * 4 * 60 / 128);
+    run(dj, 9);                                            // past the boundary's decision line (4 bars ahead of it)
+    const p = dj.pending, landsOn = p && Math.abs(p.landT - A.timeOfBeat((p.exitBar ?? 0) * 4)) < 0.05;
+    check(name, want == null ? !p : p?.exitBar === want && landsOn, { pending: p && { style: p.style, exitBar: p.exitBar, reason: p.reason } });
+  });
+}
+
+// 16. the next track is picked by the pattern of neurons it excites: an aroused DJ fly keeps the sound going (the
+// candidate whose listener response looks like the on-air track's), a calm one changes it up (the most different)
+for (const [arousal, order, want] of [[1.3, ['contrast', 'similar'], 'similar'], [0.7, ['similar', 'contrast'], 'contrast']]) {
+  test(() => {
+    const { dj } = setup({ a: track('on air'), b: track('old'), x: 0 });
+    let picked = null;
+    dj.picker = { choose: (i, t) => { picked = t.name; } };
+    dj.arFast = arousal; dj.arSlow = 1;
+    dj.airPrint = () => Float32Array.from([1, 0, 0.2]);
+    const dev = { similar: [0.9, 0.1, 0.2], contrast: [-0.8, 0.3, -0.1] };
+    dj.aud = { deck: 1, cands: order.map((n) => track(n)), scores: [100, 100], devs: order.map((n) => Float32Array.from(dev[n])) };
+    dj.finishAudition();
+    check(`pick_${want}_when_${arousal > 1 ? 'aroused' : 'calm'}`, picked === want, { picked });
+  });
+}
+
+// 17. the cell type that led a burst picks the move's variant (echo group: DNp02 echo, DNp06 reverb, DNp11 dub)
+test(() => {
+  const { dj } = setup({ a: track('one'), b: track('two'), x: 0 });
+  dj.perf.dub = () => {}; dj.perf.beatFx = () => {};
+  dj.fire('echo', 'echo group', 1.5, 0, 2);
+  check('leading_type_picks_variant', dj.played === 'dub', { played: dj.played });
+});
+
 let fails = 0;
 for (const [k, v] of Object.entries(R)) { if (!v.ok) fails++; console.log(`${v.ok ? 'pass' : 'FAIL'}  ${k}  ${JSON.stringify(v)}`); }
 process.exit(fails ? 1 : 0);

@@ -240,6 +240,8 @@ own ear input.
 **Designed (by me, in the browser and the tools):**
 - which neuron groups trigger which DJ move (the giant fiber could just as well have been mapped to echo)
 - burst detection (fast rate above slow baseline), cooldowns, the pace target, epicness
+- how the neurons' signals become decisions: the leave drive's 8 s hold and 0.12 threshold, which section
+  boundaries count as exits, and the rule that an aroused fly picks the similar track and a calm one the different one
 - ear habituation. The simulation has **no adaptation or learning while it plays**; the habituation that makes the
   fly want the other deck is computed in the browser.
 - the chain of three flies and which listener neurons feed the DJ fly's ears
@@ -249,9 +251,10 @@ own ear input.
 
 **Not from the fly:** the beat grid and song structure of analysed tracks come from the All-In-One analyzer (§10).
 
-**Where the fly comes in:** it's the performer and the source of taste. Its bursts time the moves, its most excited
-group picks the transition style, its steering says when it wants the other deck, and its listener's response picks
-the next track.
+**Where the fly comes in:** it's the performer and the source of taste. Its bursts time the moves, the cell type
+leading a burst picks the move's variant, its most excited group picks the transition style, its steering picks
+which section boundary to leave a track at, and its listeners' responses (how strong, and how alike) together with
+its arousal pick the next track.
 The DJ techniques are hand-coded moves and 29 "play like" styles, based on research into how big-name DJs play live
 ([DJ_RESEARCH.md](DJ_RESEARCH.md)). The fly's spikes decide *when* and *how intense*; the chosen style decides
 *what*.
@@ -386,8 +389,10 @@ free to play. The strongest bursts still pick the moves.
   ones that suit it: filter-type moves in intros, echo and filters in outros, echo, reverb wash and filters in
   breakdowns.
 - Scratches only play in choruses and verses (or when the PEAK sense is on).
-- Each family rotates its variants (echo / reverb / dub, trans / crush / stutter, flanger / low-pass / resonant
-  filter), never the same one twice in a row.
+- **Variants:** within a family (echo / reverb / dub, trans / crush / stutter, flanger / low-pass / resonant filter,
+  reverb / sweep) the cell type that led the burst picks the variant: each group keeps a rate per type, and the type
+  with the biggest surge over its own baseline leads (DNp02 → echo, DNp06 → reverb, DNp11 → dub …; the log names it).
+  Never the same variant twice in a row. With *neurons decide more* off, the burst's spike count picks it.
 - **Big moves:** with the default style, a strong burst (intensity ≥ 1.8) released on a 4-bar line in a chorus plays a
   big move instead, at most once every 32 bars (scaled by epicness): live chops (giant fiber or scratch group), bass
   tease or drums out (echo group), pump (trans), acid (flange), sing-along (wind).
@@ -407,9 +412,18 @@ free to play. The strongest bursts still pick the moves.
 
   | Track | Mixes out |
   |---|---|
-  | Analysed | at the planned exit (`mixBar`), decided 4 bars ahead once the minimum time on air has passed; earlier only if it wants to leave and the deck is in a breakdown in the last 40% of the track; after 4 minutes on air in any case |
+  | Analysed | at the planned exit (`mixBar`), decided 4 bars ahead once the minimum time on air has passed; earlier at a section boundary the neurons choose (below); after 4 minutes on air in any case |
   | Section sense | in a sensed outro (confidence > 0.6) after the minimum time; if it wants to leave, in a breakdown sensed at ≥ 0.85 for 2 bars in the last 30% of the track; after 4 minutes; or as the track ends |
   | Neither | when it wants to, or as the track ends |
+
+- **The neurons choose the exit** (*neurons decide more*, on by default). On an analysed track, every section
+  boundary in the second half before `mixBar` is an exit the fly may take. Its *leave drive* is its steering toward
+  the other deck (`pref`, positive part) held over ~8 s, reset when a new track comes on air. When a boundary's
+  decision line (4 bars ahead) comes, the time on air is past the minimum, and the drive (+0.5 for 32 beats after an
+  aversion burst) is over 0.12, it plans the transition to land exactly on the boundary. Styles whose lead no longer
+  fits are dropped; if none fits, that boundary isn't taken. A missed one (the performer held it) goes on the next
+  phrase line. Ear habituation, which lives in the browser, plays no part in this. Off: the late-breakdown rule above.
+  `djscore` counts these as the `neurons` driver.
 
 **Transitions.**
 - **Style:** the most excited group picks it: giant fiber → drop swap, echo group → echo out, aversion → spinback cut,
@@ -477,9 +491,14 @@ free to play. The strongest bursts still pick the moves.
    skipped.
 3. Each is scored by the descending-neuron spikes/s of that deck's listener fly (with one fly, that side of its brain),
    counted from 1.2 s in.
-4. The score is divided by (1 + 0.35 × plays), with a ×1.15 bonus for Camelot neighbours, ×1.1 for tempos within 6%,
+4. **The pattern** (three flies, *neurons decide more*): while a candidate plays, its listener's rate per descending
+   cell type is summed; minus that listener's ~3-minute baseline it is the candidate's print. The on-air track's
+   print is its listener's rates over the last ~20 s, minus that listener's baseline. Their cosine similarity
+   multiplies the score by 1 + 0.5 × lean × similarity, where lean = (DJ fly arousal fast/slow − 1) × 8, clipped to
+   ±1: an aroused fly keeps the sound going, a calm one changes it up (×0.5 to ×1.5).
+5. The score is divided by (1 + 0.35 × plays), with a ×1.15 bonus for Camelot neighbours, ×1.1 for tempos within 6%,
    and the set plan's intensity fit.
-5. The winner loads.
+6. The winner loads.
 
 Honest caveat: the ears normalize loudness, so scores for similar tracks are close. For demo tracks it's close to a
 coin toss.
@@ -646,7 +665,7 @@ with `PORT=8766`.
 |---|---|
 | `tools/djbench.mjs` | Benchmark v3: the whole app on real tracks, repeated seeded runs (`RUNS`, `MIN`). `SET=heldout`, `fresh`, or `random:<n>:<seed>`: n analysed tracks drawn by the seed from those never in `held_out.json`, `test_fresh.json`, the first 80 of `label_queue.txt` or the section model's recordings. It logs raw facts in track time: every move and transition with the on-air track and its position in seconds (as scheduled and as it played) and who drove it; transitions from lined up to fully in; master silences every 100 ms; the on-air track over time; the brain's load every second. The crate is put in name order, then shuffled by the seed (Fisher-Yates), so two app versions get the same crate. Runs go to `data/bench/`, scored by djscore. |
 | `tools/djscore.mjs` | Grades bench files offline against the raw All-In-One beats, downbeats and sections, not either version's grid: section at the landing or move, on a bar / 4-bar / 8-bar line, fit, variety, silences judged against what each move means to be silent, time on air, load (a run mean), the listeners' sense. Split by driver (planned exit, sense, 4-minute cap, track ending; bursts, sense, set plan). Mean ± Student-t 95% CI over runs, pooled Wilson intervals, and a paired A/B (`A.json B.json`). A file from before v3 scores what it can; `FILE@1167539` or `FILE@6901364` places its transitions through that version's grid fit. `--selftest` checks the scorer. |
-| `tools/test_dj_logic.mjs` | The DJ's decisions in plain Node, with no browser, server or brain: the app's own Mixer, Deck, Performer and FlyDJ on a stand-in for Web Audio that records every AudioParam call. 27 checks: replayed tracks, folds, double drops, moves before the exit, tempo holds, the fader on the audio clock… |
+| `tools/test_dj_logic.mjs` | The DJ's decisions in plain Node, with no browser, server or brain: the app's own Mixer, Deck, Performer and FlyDJ on a stand-in for Web Audio that records every AudioParam call. 34 checks: replayed tracks, folds, double drops, moves before the exit, tempo holds, the fader on the audio clock, the neurons' exits, track picks and variants… |
 | `tools/test_decks.mjs` | The app's Deck in an OfflineAudioContext with a ramp track, so the rendered output shows which position played when: single, stacked and earlier jumps, stop while a jump is pending, stems respawn, the next bar after a jump back, duck merging |
 | `tools/livetest.mjs` | A live run: how often each listener sense is on in its section against chance, listener z by section, load |
 | `tools/onairtest.mjs` | How long each track stays fully on air |
